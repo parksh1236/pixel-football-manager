@@ -61,6 +61,7 @@ export const FORMATIONS = {
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, Number(value)));
 const validCoordinate = (value) => Number.isFinite(Number(value)) && Number(value) >= 0 && Number(value) <= 100;
+const finiteCoordinate = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
 export function formationPositions(name) {
   return clone(FORMATIONS[name] || FORMATIONS["4-3-3"]);
@@ -70,11 +71,13 @@ const defaultCustomPositions = (formation) => Object.fromEntries(
   formationPositions(formation).map((position) => [position.playerId, position]),
 );
 
-function legalPosition(playerId, x, y, role) {
-  const position = { playerId, x: clamp(x, 0, 100), y: clamp(y, 0, 100), role };
+function legalPosition(playerId, x, y, role, fallback = { x: 0, y: 0 }) {
+  const safeX = finiteCoordinate(x, fallback.x);
+  const safeY = finiteCoordinate(y, fallback.y);
+  const position = { playerId, x: clamp(safeX, 0, 100), y: clamp(safeY, 0, 100), role };
   if (playerId === "player-0") {
-    position.x = clamp(x, 0, 18);
-    position.y = clamp(y, 21, 79);
+    position.x = clamp(safeX, 0, 18);
+    position.y = clamp(safeY, 21, 79);
   }
   return position;
 }
@@ -83,7 +86,7 @@ export function movePlayer(season, playerId, x, y) {
   const next = migrateSeason(season);
   const current = next.customPositions[playerId];
   if (!current) return next;
-  next.customPositions[playerId] = legalPosition(playerId, x, y, current.role);
+  next.customPositions[playerId] = legalPosition(playerId, x, y, current.role, current);
   return next;
 }
 

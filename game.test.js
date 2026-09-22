@@ -61,6 +61,14 @@ test("goalkeeper movement is clamped to its penalty area", () => {
   assert.ok(next.customPositions["player-0"].x <= 18);
 });
 
+test("player movement keeps non-finite coordinates legal", () => {
+  const season = createSeason();
+  const fieldPlayer = movePlayer(season, "player-1", Number.NaN, undefined);
+  const goalkeeper = movePlayer(season, "player-0", Number.NaN, Infinity);
+  assert.deepEqual(fieldPlayer.customPositions["player-1"], season.customPositions["player-1"]);
+  assert.deepEqual(goalkeeper.customPositions["player-0"], season.customPositions["player-0"]);
+});
+
 test("version one saves migrate to version two with a formation", () => {
   const old = createSeason();
   old.version = 1;
