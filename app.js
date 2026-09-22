@@ -1,4 +1,4 @@
-import { calculateTable, commentate, completeRound, createSeason, FORMATIONS, formationPositions, lineupPositions, migrateSeason, movePlayer, swapStarter } from "./game.js";
+import { calculateTable, commentate, completeRound, createSeason, FORMATIONS, formationPositions, formationSuitability, interpolateMatchState, lineupPositions, matchVisualState, migrateSeason, movePlayer, pitchPoint, scoreForEvents, swapStarter } from "./game.js";
 
 const STORAGE_KEY = "pixel-manager-season-v1";
 const app = document.querySelector("#app");
@@ -7,6 +7,7 @@ const roundStatus = document.querySelector("#round-status");
 let activeView = "dashboard";
 let matchRunning = false;
 let draggedMarker = null;
+let visualState = null;
 
 const HIGHLIGHTS = {
   shot: "assets/highlights/shot.png",
@@ -14,6 +15,17 @@ const HIGHLIGHTS = {
   "key-pass": "assets/highlights/pass.png",
   goal: "assets/highlights/celebration.png",
 };
+const highlightImages = {};
+const highlightsReady = Promise.all(Object.entries(HIGHLIGHTS).map(async ([type, src]) => {
+  const image = new Image();
+  image.src = src;
+  try {
+    await image.decode();
+    highlightImages[type] = image;
+  } catch {
+    // Commentary still describes the event if an optional local image is unavailable.
+  }
+}));
 
 function validSeason(value) {
   return (value?.version === 1 || value?.version === 2)
@@ -91,6 +103,7 @@ function renderDashboard() {
               ${slots.map((slot, index) => { const player = season.players.find(({ id }) => id === lineup[index].playerId); return `<button class="formation-marker${slot.playerId === "player-0" ? " goalkeeper" : ""}" data-slot="${slot.playerId}" style="--x:${slot.x};--y:${slot.y}" aria-label="${player?.name || slot.role}, ${slot.role}, 위치 ${slot.x}, ${slot.y}">${player?.name.slice(-2) || slot.role}<span>${slot.role}</span></button>`; }).join("")}
             </div>
             <p class="editor-status" id="position-status" aria-live="polite">선수를 선택해 위치를 조정하세요.</p>
+            <p class="editor-status" id="suitability-status" aria-live="polite">${suitabilityMessage()}</p>
           </div>
           <div class="tactics" aria-label="전술 선택">
             ${[["attacking", "공격형"], ["balanced", "균형형"], ["defensive", "수비형"]].map(([value, label]) => `<button class="choice-button tactic" data-tactic="${value}" aria-pressed="${season.tactic === value}">${label}</button>`).join("")}
@@ -106,6 +119,11 @@ function renderDashboard() {
     </div>`;
 }
 
+function suitabilityMessage() {
+  const { warnings, penalty } = formationSuitability(season);
+  return warnings.length ? `적합도 경고: ${warnings.map(({ name }) => name).join(", ")} · 팀 전력 -${penalty.toFixed(2)}` : "포지션 적합 · 팀 전력 감점 없음";
+}
+
 function positionMarker(marker, x, y) {
   season = movePlayer(season, marker.dataset.slot, x, y);
   const position = season.customPositions[marker.dataset.slot];
@@ -115,6 +133,7 @@ function positionMarker(marker, x, y) {
   marker.setAttribute("aria-label", `${playerName}, ${position.role}, 위치 ${position.x}, ${position.y}`);
   const status = document.querySelector("#position-status");
   if (status) status.textContent = `${playerName} 위치 ${position.x}, ${position.y}`;
+  document.querySelector("#suitability-status").textContent = suitabilityMessage();
 }
 
 function pointerPosition(event) {
@@ -159,17 +178,7 @@ function render() {
   else renderDashboard();
 }
 
-const eventShift = (position, event, home) => {
-  const direction = home ? 1 : -1;
-  const shifts = {
-    "build-up": [8, 0], pressure: [12, 0], dribble: [16, position.y < 50 ? -10 : 10],
-    pass: [18, 0], shot: [28, 0], goal: [34, 0],
-  };
-  const [x, y] = shifts[event?.type] || [event?.zone === "counter" ? 22 : 0, event?.zone === "flank" ? 12 : 0];
-  return { x: Math.max(4, Math.min(96, position.x + x * direction)), y: Math.max(5, Math.min(95, position.y + y)) };
-};
-
-function drawPitch(canvas, event = { type: "kickoff" }, fixture = userFixture(), progress = 1) {
+function drawPitch(canvas, state = visualState) {
   const ratio = devicePixelRatio || 1;
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
@@ -186,42 +195,35 @@ function drawPitch(canvas, event = { type: "kickoff" }, fixture = userFixture(),
   context.strokeRect(18, 18, width - 36, height - 36);
   context.beginPath(); context.moveTo(width / 2, 18); context.lineTo(width / 2, height - 18); context.stroke();
   context.beginPath(); context.arc(width / 2, height / 2, 48, 0, Math.PI * 2); context.stroke();
-  const base = lineupPositions(season);
-  const userHome = fixture?.home === "team-0";
-  const sides = [
-    { home: userHome, color: team("team-0")?.color || "#44d17a", positions: base },
-    { home: !userHome, color: team(fixture?.home === "team-0" ? fixture?.away : fixture?.home)?.color || "#fb7185", positions: formationPositions("4-3-3") },
-  ];
-  let ball = { x: 50, y: 50 };
-  for (const side of sides) {
-    for (const position of side.positions) {
-      const start = side.home ? position : { ...position, x: 100 - position.x, y: 100 - position.y };
-      const active = event?.teamId === (side.home ? fixture?.home : fixture?.away);
-      const target = active ? eventShift(start, event, side.home) : start;
-      const x = start.x + (target.x - start.x) * progress;
-      const y = start.y + (target.y - start.y) * progress;
-      const px = 18 + (width - 36) * x / 100;
-      const py = 18 + (height - 36) * y / 100;
-      context.fillStyle = side.color;
-      context.fillRect(px - 5, py - 5, 10, 10);
-      context.fillRect(px - 8, py - 3, 16, 4);
-      if (active && position.playerId === event.playerId) ball = { x: px, y: py };
-    }
+  const boxWidth = (width - 36) * 0.18;
+  const boxTop = 18 + (height - 36) * 0.21;
+  context.strokeRect(18, boxTop, boxWidth, (height - 36) * 0.58);
+  context.strokeRect(width - 18 - boxWidth, boxTop, boxWidth, (height - 36) * 0.58);
+  for (const position of state.players) {
+    const { x, y } = pitchPoint(position, width, height);
+    context.fillStyle = team(position.teamId).color;
+    context.fillRect(x - 5, y - 5, 10, 10);
+    context.fillRect(x - 8, y - 3, 16, 4);
   }
+  const ball = pitchPoint(state.ball, width, height);
   context.fillStyle = "#f7f2d0";
   context.fillRect(ball.x - 4, ball.y - 4, 8, 8);
 }
 
 function animatePitch(canvas, event, fixture, reduceMotion) {
+  const previous = visualState;
+  const target = matchVisualState(season, fixture, event);
   if (reduceMotion) {
-    drawPitch(canvas, event, fixture);
+    visualState = target;
+    drawPitch(canvas);
     return Promise.resolve();
   }
   return new Promise((resolve) => {
     const started = performance.now();
     const frame = (now) => {
       const progress = Math.min(1, (now - started) / 360);
-      drawPitch(canvas, event, fixture, progress);
+      visualState = interpolateMatchState(previous, target, progress);
+      drawPitch(canvas);
       if (progress < 1) requestAnimationFrame(frame); else resolve();
     };
     requestAnimationFrame(frame);
@@ -239,31 +241,38 @@ async function playMatch() {
   const away = team(fixture.away);
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
   app.innerHTML = `${header("LIVE MATCH", "전술 지시가 경기장에서 실행되고 있습니다.", "TOUCHLINE FEED")}
-    <section class="panel"><div class="match-stage"><div class="pitch-wrap"><canvas id="match-canvas" aria-label="22명의 선수와 공이 움직이는 픽셀 경기장"></canvas><div class="scoreboard"><span id="match-minute">00'</span><br><strong id="match-score">${home.short} ${result.home} : ${result.away} ${away.short}</strong></div></div><div class="highlight" id="match-highlight" hidden></div></div><ol class="commentary" id="commentary" aria-live="polite"></ol></section>`;
+    <section class="panel"><div class="match-stage"><div class="pitch-wrap"><canvas id="match-canvas" aria-label="22명의 선수와 공이 움직이는 픽셀 경기장"></canvas><div class="scoreboard"><span id="match-minute">00'</span><br><strong id="match-score">${home.short} 0 : 0 ${away.short}</strong></div></div><div class="highlight" id="match-highlight" hidden></div></div><p class="sr-only" id="match-announcement" aria-live="assertive" aria-atomic="true"></p><ol class="commentary" id="commentary" aria-live="polite"></ol></section>`;
   const canvas = document.querySelector("#match-canvas");
   const score = document.querySelector("#match-score");
   const minuteLabel = document.querySelector("#match-minute");
   const log = document.querySelector("#commentary");
   const highlight = document.querySelector("#match-highlight");
-  for (const event of result.events) {
+  visualState = matchVisualState(season, fixture);
+  drawPitch(canvas);
+  await highlightsReady;
+  for (const [index, event] of result.events.entries()) {
     highlight.hidden = true;
     highlight.replaceChildren();
     await animatePitch(canvas, event, fixture, reduceMotion);
     minuteLabel.textContent = `${event.minute}'`;
     const sentence = commentate(event, season);
+    const currentScore = scoreForEvents(fixture, result.events.slice(0, index + 1));
+    score.textContent = `${home.short} ${currentScore.home} : ${currentScore.away} ${away.short}`;
+    if (event.type === "goal" || event.type === "full-time") document.querySelector("#match-announcement").textContent = `${sentence} ${score.textContent}`;
     const item = document.createElement("li");
     item.textContent = sentence;
     log.append(item);
-    const highlightSrc = HIGHLIGHTS[event.type === "pass" ? "key-pass" : event.type];
-    if (highlightSrc) {
-      const image = document.createElement("img");
-      image.src = highlightSrc;
+    const image = highlightImages[event.type];
+    if (image) {
       image.alt = sentence;
-      highlight.append(image);
+      const caption = document.createElement("p");
+      caption.textContent = sentence;
+      highlight.append(image, caption);
       highlight.hidden = false;
     }
     log.scrollTop = log.scrollHeight;
-    await new Promise((resolve) => setTimeout(resolve, reduceMotion ? 600 : 60));
+    await new Promise((resolve) => setTimeout(resolve, image ? 1800 : 600));
+    if (event.type === "goal" || event.type === "save") await animatePitch(canvas, { type: "kickoff" }, fixture, reduceMotion);
   }
   score.textContent = `${home.short} ${result.home} : ${result.away} ${away.short}`;
   season = outcome.season;
@@ -337,7 +346,9 @@ app.addEventListener("pointerup", () => {
 });
 
 app.addEventListener("pointercancel", () => {
+  if (!draggedMarker) return;
   draggedMarker = null;
+  saveSeason();
 });
 
 app.addEventListener("keydown", (event) => {
