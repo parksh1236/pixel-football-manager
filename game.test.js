@@ -1,0 +1,44 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  calculateTable,
+  completeRound,
+  createSchedule,
+  createSeason,
+  swapStarter,
+} from "./game.js";
+
+test("eight teams produce fourteen rounds and 56 fixtures", () => {
+  const rounds = createSchedule(["a", "b", "c", "d", "e", "f", "g", "h"]);
+  assert.equal(rounds.length, 14);
+  assert.equal(rounds.flat().length, 56);
+});
+
+test("table sorts by points, goal difference, then goals scored", () => {
+  const season = createSeason();
+  season.fixtures[0][0].result = { home: 2, away: 0, events: [] };
+  const table = calculateTable(season);
+  assert.equal(table[0].points, 3);
+  assert.equal(table.at(-1).points, 0);
+});
+
+test("bench selection swaps a starter in the same position group", () => {
+  const season = createSeason();
+  const benchPlayer = season.players.find(
+    (player) => !player.starter && player.position !== "GK",
+  );
+  const next = swapStarter(season, benchPlayer.id);
+  assert.equal(next.players.filter((player) => player.starter).length, 11);
+  assert.equal(
+    next.players.find((player) => player.id === benchPlayer.id).starter,
+    true,
+  );
+});
+
+test("a completed round cannot be awarded twice", () => {
+  const season = createSeason();
+  const first = completeRound(season, () => 0.5);
+  const second = completeRound(first.season, () => 0.5, 0);
+  assert.equal(second.season.round, 1);
+  assert.equal(second.alreadyCompleted, true);
+});
