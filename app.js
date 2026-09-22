@@ -1,4 +1,4 @@
-import { calculateTable, commentate, completeRound, createSeason, formationPositions, migrateSeason, swapStarter } from "./game.js";
+import { calculateTable, commentate, completeRound, createSeason, formationPositions, lineupPositions, migrateSeason, swapStarter } from "./game.js";
 
 const STORAGE_KEY = "pixel-manager-season-v1";
 const app = document.querySelector("#app");
@@ -145,9 +145,7 @@ function drawPitch(canvas, event = { type: "kickoff" }, fixture = userFixture(),
   context.strokeRect(18, 18, width - 36, height - 36);
   context.beginPath(); context.moveTo(width / 2, 18); context.lineTo(width / 2, height - 18); context.stroke();
   context.beginPath(); context.arc(width / 2, height / 2, 48, 0, Math.PI * 2); context.stroke();
-  const base = Object.values(season.customPositions || {}).length === 11
-    ? Object.values(season.customPositions)
-    : formationPositions(season.formation);
+  const base = lineupPositions(season);
   const userHome = fixture?.home === "team-0";
   const sides = [
     { home: userHome, color: team("team-0")?.color || "#44d17a", positions: base },
@@ -212,14 +210,13 @@ async function playMatch() {
     item.textContent = commentate(event, season);
     log.append(item);
     log.scrollTop = log.scrollHeight;
-    if (!reduceMotion) await new Promise((resolve) => setTimeout(resolve, 60));
+    await new Promise((resolve) => setTimeout(resolve, reduceMotion ? 600 : 60));
   }
   score.textContent = `${home.short} ${result.home} : ${result.away} ${away.short}`;
   season = outcome.season;
   saveSeason();
   matchRunning = false;
-  await new Promise((resolve) => setTimeout(resolve, reduceMotion ? 80 : 900));
-  renderDashboard();
+  log.insertAdjacentHTML("afterend", '<button class="primary-button" id="match-complete">경기 결과 계속 보기</button>');
 }
 
 document.querySelector(".sidebar").addEventListener("click", (event) => {
@@ -255,6 +252,8 @@ app.addEventListener("click", (event) => {
       saveSeason();
       render();
     }
+  } else if (event.target.closest("#match-complete")) {
+    renderDashboard();
   }
 });
 

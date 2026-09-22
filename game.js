@@ -90,6 +90,18 @@ export function movePlayer(season, playerId, x, y) {
   return next;
 }
 
+const roleGroup = (role) => role === "GK" ? "GK" : role.includes("B") ? "DF" : role.includes("M") ? "MF" : "FW";
+
+export function lineupPositions(season) {
+  const slots = formationPositions(season.formation).map((slot) => season.customPositions?.[slot.playerId] || slot);
+  const starters = season.players.filter(({ starter }) => starter);
+  const pools = starters.reduce((groups, player) => {
+    (groups[groupFor(player.position)] ||= []).push(player);
+    return groups;
+  }, {});
+  return slots.map((slot) => ({ ...slot, playerId: pools[roleGroup(slot.role)]?.shift()?.id || slot.playerId }));
+}
+
 export function migrateSeason(value) {
   const next = clone(value);
   const formation = FORMATIONS[next.formation] ? next.formation : "4-3-3";
@@ -246,7 +258,8 @@ function poisson(lambda, random) {
   return Math.min(5, value - 1);
 }
 
-const eventPlayer = (season, random, attacking = true) => {
+const eventPlayer = (season, teamId, random, attacking = true) => {
+  if (teamId !== "team-0") return null;
   const pool = season.players.filter(({ starter, position }) => starter && (attacking ? position !== "GK" : position === "GK"));
   return pool[Math.floor(random() * pool.length)]?.id || (attacking ? "player-8" : "player-0");
 };
@@ -254,12 +267,12 @@ const eventPlayer = (season, random, attacking = true) => {
 export function createMatchEvents(season, fixture, result, random = Math.random) {
   const events = [
     { minute: 0, type: "kickoff", teamId: fixture.home, playerId: null, targetPlayerId: null, outcome: "started", zone: "center" },
-    { minute: 5, type: "build-up", teamId: fixture.home, playerId: eventPlayer(season, random), targetPlayerId: null, outcome: "progressed", zone: "defense" },
-    { minute: 12, type: "pressure", teamId: fixture.away, playerId: eventPlayer(season, random), targetPlayerId: null, outcome: "won", zone: "midfield" },
-    { minute: 19, type: "dribble", teamId: fixture.home, playerId: eventPlayer(season, random), targetPlayerId: null, outcome: "completed", zone: "flank" },
-    { minute: 27, type: "pass", teamId: fixture.away, playerId: eventPlayer(season, random), targetPlayerId: eventPlayer(season, random), outcome: "completed", zone: "counter" },
-    { minute: 34, type: "shot", teamId: fixture.home, playerId: eventPlayer(season, random), targetPlayerId: null, outcome: "saved", zone: "box" },
-    { minute: 34, type: "save", teamId: fixture.away, playerId: eventPlayer(season, random, false), targetPlayerId: null, outcome: "saved", zone: "goal" },
+    { minute: 5, type: "build-up", teamId: fixture.home, playerId: eventPlayer(season, fixture.home, random), targetPlayerId: null, outcome: "progressed", zone: "defense" },
+    { minute: 12, type: "pressure", teamId: fixture.away, playerId: eventPlayer(season, fixture.away, random), targetPlayerId: null, outcome: "won", zone: "midfield" },
+    { minute: 19, type: "dribble", teamId: fixture.home, playerId: eventPlayer(season, fixture.home, random), targetPlayerId: null, outcome: "completed", zone: "flank" },
+    { minute: 27, type: "pass", teamId: fixture.away, playerId: eventPlayer(season, fixture.away, random), targetPlayerId: eventPlayer(season, fixture.away, random), outcome: "completed", zone: "counter" },
+    { minute: 34, type: "shot", teamId: fixture.home, playerId: eventPlayer(season, fixture.home, random), targetPlayerId: null, outcome: "saved", zone: "box" },
+    { minute: 34, type: "save", teamId: fixture.away, playerId: eventPlayer(season, fixture.away, random, false), targetPlayerId: null, outcome: "saved", zone: "goal" },
   ];
   const goals = [
     ...Array.from({ length: result.home }, () => fixture.home),
@@ -267,7 +280,7 @@ export function createMatchEvents(season, fixture, result, random = Math.random)
   ];
   goals.forEach((teamId, index) => {
     const minute = Math.min(89, 10 + Math.floor(((index + 1) * 75) / (goals.length + 1)) + Math.floor(random() * 5));
-    const playerId = eventPlayer(season, random);
+    const playerId = eventPlayer(season, teamId, random);
     events.push(
       { minute: Math.max(1, minute - 1), type: "shot", teamId, playerId, targetPlayerId: null, outcome: "goal", zone: "box" },
       { minute, type: "goal", teamId, playerId, targetPlayerId: null, outcome: "scored", zone: "goal" },
@@ -278,7 +291,7 @@ export function createMatchEvents(season, fixture, result, random = Math.random)
 }
 
 export function commentate(event, season) {
-  const player = season.players.find(({ id }) => id === event.playerId)?.name || "선수";
+  const player = season.players.find(({ id }) => id === event.playerId)?.name || "상대 선수";
   const target = season.players.find(({ id }) => id === event.targetPlayerId)?.name || "동료";
   const prefix = `${event.minute}'`;
   const lines = {

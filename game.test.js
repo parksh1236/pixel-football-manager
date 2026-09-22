@@ -9,6 +9,7 @@ import {
   createSeason,
   FORMATIONS,
   formationPositions,
+  lineupPositions,
   migrateSeason,
   movePlayer,
   swapStarter,
@@ -27,6 +28,25 @@ test("commentary names the event player", () => {
   const text = commentate({ minute: 9, type: "shot", teamId: "team-0", playerId: "player-8", outcome: "saved", zone: "box" }, season);
   assert.match(text, /임성민/);
   assert.match(text, /슈팅|선방/);
+});
+
+test("opponent events never borrow a user player identity", () => {
+  const season = createSeason();
+  const fixture = season.fixtures[0][0];
+  const events = createMatchEvents(season, fixture, { home: 0, away: 0 }, () => 0.5);
+  const opponentEvent = events.find(({ teamId }) => teamId !== "team-0" && teamId);
+  assert.equal(opponentEvent.playerId, null);
+  assert.doesNotMatch(commentate(opponentEvent, season), /임성민|강민준|윤태호/);
+});
+
+test("formation slots are assigned to the current starters", () => {
+  const season = createSeason();
+  const substitute = season.players.find(({ starter, position }) => !starter && position !== "GK");
+  const next = swapStarter(season, substitute.id);
+  const positions = lineupPositions(next);
+  assert.equal(positions.length, 11);
+  assert.ok(positions.some(({ playerId }) => playerId === substitute.id));
+  assert.ok(positions.every(({ playerId }) => next.players.find((player) => player.id === playerId)?.starter));
 });
 
 test("eight teams produce fourteen rounds and 56 fixtures", () => {
