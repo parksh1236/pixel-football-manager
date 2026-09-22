@@ -246,6 +246,55 @@ function poisson(lambda, random) {
   return Math.min(5, value - 1);
 }
 
+const eventPlayer = (season, random, attacking = true) => {
+  const pool = season.players.filter(({ starter, position }) => starter && (attacking ? position !== "GK" : position === "GK"));
+  return pool[Math.floor(random() * pool.length)]?.id || (attacking ? "player-8" : "player-0");
+};
+
+export function createMatchEvents(season, fixture, result, random = Math.random) {
+  const events = [
+    { minute: 0, type: "kickoff", teamId: fixture.home, playerId: null, targetPlayerId: null, outcome: "started", zone: "center" },
+    { minute: 5, type: "build-up", teamId: fixture.home, playerId: eventPlayer(season, random), targetPlayerId: null, outcome: "progressed", zone: "defense" },
+    { minute: 12, type: "pressure", teamId: fixture.away, playerId: eventPlayer(season, random), targetPlayerId: null, outcome: "won", zone: "midfield" },
+    { minute: 19, type: "dribble", teamId: fixture.home, playerId: eventPlayer(season, random), targetPlayerId: null, outcome: "completed", zone: "flank" },
+    { minute: 27, type: "pass", teamId: fixture.away, playerId: eventPlayer(season, random), targetPlayerId: eventPlayer(season, random), outcome: "completed", zone: "counter" },
+    { minute: 34, type: "shot", teamId: fixture.home, playerId: eventPlayer(season, random), targetPlayerId: null, outcome: "saved", zone: "box" },
+    { minute: 34, type: "save", teamId: fixture.away, playerId: eventPlayer(season, random, false), targetPlayerId: null, outcome: "saved", zone: "goal" },
+  ];
+  const goals = [
+    ...Array.from({ length: result.home }, () => fixture.home),
+    ...Array.from({ length: result.away }, () => fixture.away),
+  ];
+  goals.forEach((teamId, index) => {
+    const minute = Math.min(89, 10 + Math.floor(((index + 1) * 75) / (goals.length + 1)) + Math.floor(random() * 5));
+    const playerId = eventPlayer(season, random);
+    events.push(
+      { minute: Math.max(1, minute - 1), type: "shot", teamId, playerId, targetPlayerId: null, outcome: "goal", zone: "box" },
+      { minute, type: "goal", teamId, playerId, targetPlayerId: null, outcome: "scored", zone: "goal" },
+    );
+  });
+  events.push({ minute: 90, type: "full-time", teamId: null, playerId: null, targetPlayerId: null, outcome: "finished", zone: "center" });
+  return events.sort((a, b) => a.minute - b.minute);
+}
+
+export function commentate(event, season) {
+  const player = season.players.find(({ id }) => id === event.playerId)?.name || "선수";
+  const target = season.players.find(({ id }) => id === event.targetPlayerId)?.name || "동료";
+  const prefix = `${event.minute}'`;
+  const lines = {
+    kickoff: `${prefix} 킥오프! 경기가 시작됩니다.`,
+    "build-up": `${prefix} ${player}, 후방에서 차분히 공격을 전개합니다.`,
+    pressure: `${prefix} ${player}의 강한 압박!`,
+    dribble: `${prefix} ${player}, 측면을 따라 드리블합니다.`,
+    pass: `${prefix} ${player}가 ${target}에게 패스합니다.`,
+    shot: `${prefix} ${player}의 슈팅${event.outcome === "saved" ? ", 골키퍼가 선방합니다!" : "!"}`,
+    save: `${prefix} ${player}의 멋진 선방!`,
+    goal: `${prefix} 골! ${player}가 마무리합니다.`,
+    "full-time": `${prefix} 경기 종료.`,
+  };
+  return lines[event.type] || `${prefix} 경기가 계속됩니다.`;
+}
+
 export function simulateFixture(season, fixture, random = Math.random) {
   const userHome = fixture.home === "team-0";
   const userAway = fixture.away === "team-0";
@@ -262,15 +311,7 @@ export function simulateFixture(season, fixture, random = Math.random) {
     + (userAway ? tactic : userHome ? -tactic : 0);
   const home = poisson(Math.max(0.2, homeAttack), random);
   const away = poisson(Math.max(0.2, awayAttack), random);
-  const events = [];
-  const addGoals = (count, side) => {
-    for (let index = 0; index < count; index += 1) {
-      events.push({ minute: 4 + Math.floor(random() * 86), side, type: "goal" });
-    }
-  };
-  addGoals(home, "home");
-  addGoals(away, "away");
-  events.sort((a, b) => a.minute - b.minute);
+  const events = createMatchEvents(season, fixture, { home, away }, random);
   return { home, away, events };
 }
 

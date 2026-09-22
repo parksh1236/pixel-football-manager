@@ -1,4 +1,4 @@
-import { calculateTable, completeRound, createSeason, swapStarter } from "./game.js";
+import { calculateTable, commentate, completeRound, createSeason, formationPositions, migrateSeason, swapStarter } from "./game.js";
 
 const STORAGE_KEY = "pixel-manager-season-v1";
 const app = document.querySelector("#app");
@@ -8,7 +8,7 @@ let activeView = "dashboard";
 let matchRunning = false;
 
 function validSeason(value) {
-  return value?.version === 1
+  return (value?.version === 1 || value?.version === 2)
     && Array.isArray(value.teams)
     && value.teams.length === 8
     && Array.isArray(value.players)
@@ -21,7 +21,7 @@ function validSeason(value) {
 function loadSeason() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (validSeason(saved)) return saved;
+    if (validSeason(saved)) return migrateSeason(saved);
   } catch {
     saveStatus.textContent = "새 시즌 복구";
   }
@@ -118,7 +118,17 @@ function render() {
   else renderDashboard();
 }
 
-function drawPitch(canvas, minute = 0) {
+const eventShift = (position, event, home) => {
+  const direction = home ? 1 : -1;
+  const shifts = {
+    "build-up": [8, 0], pressure: [12, 0], dribble: [16, position.y < 50 ? -10 : 10],
+    pass: [18, 0], shot: [28, 0], goal: [34, 0],
+  };
+  const [x, y] = shifts[event?.type] || [event?.zone === "counter" ? 22 : 0, event?.zone === "flank" ? 12 : 0];
+  return { x: Math.max(4, Math.min(96, position.x + x * direction)), y: Math.max(5, Math.min(95, position.y + y)) };
+};
+
+function drawPitch(canvas, event = { type: "kickoff" }, fixture = userFixture(), progress = 1) {
   const ratio = devicePixelRatio || 1;
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
@@ -135,9 +145,48 @@ function drawPitch(canvas, minute = 0) {
   context.strokeRect(18, 18, width - 36, height - 36);
   context.beginPath(); context.moveTo(width / 2, 18); context.lineTo(width / 2, height - 18); context.stroke();
   context.beginPath(); context.arc(width / 2, height / 2, 48, 0, Math.PI * 2); context.stroke();
-  const ballX = 30 + (width - 60) * (minute / 90);
+  const base = Object.values(season.customPositions || {}).length === 11
+    ? Object.values(season.customPositions)
+    : formationPositions(season.formation);
+  const userHome = fixture?.home === "team-0";
+  const sides = [
+    { home: userHome, color: team("team-0")?.color || "#44d17a", positions: base },
+    { home: !userHome, color: team(fixture?.home === "team-0" ? fixture?.away : fixture?.home)?.color || "#fb7185", positions: formationPositions("4-3-3") },
+  ];
+  let ball = { x: 50, y: 50 };
+  for (const side of sides) {
+    for (const position of side.positions) {
+      const start = side.home ? position : { ...position, x: 100 - position.x, y: 100 - position.y };
+      const active = event?.teamId === (side.home ? fixture?.home : fixture?.away);
+      const target = active ? eventShift(start, event, side.home) : start;
+      const x = start.x + (target.x - start.x) * progress;
+      const y = start.y + (target.y - start.y) * progress;
+      const px = 18 + (width - 36) * x / 100;
+      const py = 18 + (height - 36) * y / 100;
+      context.fillStyle = side.color;
+      context.fillRect(px - 5, py - 5, 10, 10);
+      context.fillRect(px - 8, py - 3, 16, 4);
+      if (active && position.playerId === event.playerId) ball = { x: px, y: py };
+    }
+  }
   context.fillStyle = "#f7f2d0";
-  context.fillRect(ballX - 4, height / 2 - 4, 8, 8);
+  context.fillRect(ball.x - 4, ball.y - 4, 8, 8);
+}
+
+function animatePitch(canvas, event, fixture, reduceMotion) {
+  if (reduceMotion) {
+    drawPitch(canvas, event, fixture);
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const started = performance.now();
+    const frame = (now) => {
+      const progress = Math.min(1, (now - started) / 360);
+      drawPitch(canvas, event, fixture, progress);
+      if (progress < 1) requestAnimationFrame(frame); else resolve();
+    };
+    requestAnimationFrame(frame);
+  });
 }
 
 async function playMatch() {
@@ -151,26 +200,21 @@ async function playMatch() {
   const away = team(fixture.away);
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
   app.innerHTML = `${header("LIVE MATCH", "전술 지시가 경기장에서 실행되고 있습니다.", "TOUCHLINE FEED")}
-    <section class="panel"><div class="pitch-wrap"><canvas id="match-canvas" aria-label="픽셀 경기장 경기 진행 화면"></canvas><div class="scoreboard"><span id="match-minute">00'</span><br><strong id="match-score">${home.short} 0 : 0 ${away.short}</strong></div></div><ol class="commentary" id="commentary" aria-live="polite"><li>킥오프! 경기가 시작됩니다.</li></ol></section>`;
+    <section class="panel"><div class="pitch-wrap"><canvas id="match-canvas" aria-label="22명의 선수와 공이 움직이는 픽셀 경기장"></canvas><div class="scoreboard"><span id="match-minute">00'</span><br><strong id="match-score">${home.short} ${result.home} : ${result.away} ${away.short}</strong></div></div><ol class="commentary" id="commentary" aria-live="polite"></ol></section>`;
   const canvas = document.querySelector("#match-canvas");
   const score = document.querySelector("#match-score");
   const minuteLabel = document.querySelector("#match-minute");
   const log = document.querySelector("#commentary");
-  let homeGoals = 0;
-  let awayGoals = 0;
-  const moments = [...result.events, { minute: 90, type: "full-time" }];
-  for (const event of moments) {
-    await new Promise((resolve) => setTimeout(resolve, reduceMotion ? 40 : 420));
-    drawPitch(canvas, event.minute);
+  for (const event of result.events) {
+    await animatePitch(canvas, event, fixture, reduceMotion);
     minuteLabel.textContent = `${event.minute}'`;
-    if (event.type === "goal") {
-      if (event.side === "home") homeGoals += 1; else awayGoals += 1;
-      score.textContent = `${home.short} ${homeGoals} : ${awayGoals} ${away.short}`;
-      log.insertAdjacentHTML("beforeend", `<li><strong>${event.minute}' GOAL!</strong> ${event.side === "home" ? home.name : away.name} 득점.</li>`);
-      log.scrollTop = log.scrollHeight;
-    }
+    const item = document.createElement("li");
+    item.textContent = commentate(event, season);
+    log.append(item);
+    log.scrollTop = log.scrollHeight;
+    if (!reduceMotion) await new Promise((resolve) => setTimeout(resolve, 60));
   }
-  log.insertAdjacentHTML("beforeend", `<li><strong>FULL TIME</strong> ${home.name} ${result.home}-${result.away} ${away.name}</li>`);
+  score.textContent = `${home.short} ${result.home} : ${result.away} ${away.short}`;
   season = outcome.season;
   saveSeason();
   matchRunning = false;

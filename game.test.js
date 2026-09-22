@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   calculateTable,
   completeRound,
+  commentate,
+  createMatchEvents,
   createSchedule,
   createSeason,
   FORMATIONS,
@@ -11,6 +13,21 @@ import {
   movePlayer,
   swapStarter,
 } from "./game.js";
+
+test("match events are ordered and reproduce the final score", () => {
+  const season = createSeason();
+  const fixture = season.fixtures[0][0];
+  const events = createMatchEvents(season, fixture, { home: 2, away: 1 }, () => 0.5);
+  assert.deepEqual([...events].sort((a, b) => a.minute - b.minute), events);
+  assert.equal(events.filter(({ type }) => type === "goal").length, 3);
+});
+
+test("commentary names the event player", () => {
+  const season = createSeason();
+  const text = commentate({ minute: 9, type: "shot", teamId: "team-0", playerId: "player-8", outcome: "saved", zone: "box" }, season);
+  assert.match(text, /임성민/);
+  assert.match(text, /슈팅|선방/);
+});
 
 test("eight teams produce fourteen rounds and 56 fixtures", () => {
   const rounds = createSchedule(["a", "b", "c", "d", "e", "f", "g", "h"]);
