@@ -7,6 +7,13 @@ const roundStatus = document.querySelector("#round-status");
 let activeView = "dashboard";
 let matchRunning = false;
 
+const HIGHLIGHTS = {
+  shot: "assets/highlights/shot.png",
+  save: "assets/highlights/save.png",
+  "key-pass": "assets/highlights/pass.png",
+  goal: "assets/highlights/celebration.png",
+};
+
 function validSeason(value) {
   return (value?.version === 1 || value?.version === 2)
     && Array.isArray(value.teams)
@@ -198,17 +205,29 @@ async function playMatch() {
   const away = team(fixture.away);
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
   app.innerHTML = `${header("LIVE MATCH", "전술 지시가 경기장에서 실행되고 있습니다.", "TOUCHLINE FEED")}
-    <section class="panel"><div class="pitch-wrap"><canvas id="match-canvas" aria-label="22명의 선수와 공이 움직이는 픽셀 경기장"></canvas><div class="scoreboard"><span id="match-minute">00'</span><br><strong id="match-score">${home.short} ${result.home} : ${result.away} ${away.short}</strong></div></div><ol class="commentary" id="commentary" aria-live="polite"></ol></section>`;
+    <section class="panel"><div class="match-stage"><div class="pitch-wrap"><canvas id="match-canvas" aria-label="22명의 선수와 공이 움직이는 픽셀 경기장"></canvas><div class="scoreboard"><span id="match-minute">00'</span><br><strong id="match-score">${home.short} ${result.home} : ${result.away} ${away.short}</strong></div></div><div class="highlight" id="match-highlight" hidden></div></div><ol class="commentary" id="commentary" aria-live="polite"></ol></section>`;
   const canvas = document.querySelector("#match-canvas");
   const score = document.querySelector("#match-score");
   const minuteLabel = document.querySelector("#match-minute");
   const log = document.querySelector("#commentary");
+  const highlight = document.querySelector("#match-highlight");
   for (const event of result.events) {
+    highlight.hidden = true;
+    highlight.replaceChildren();
     await animatePitch(canvas, event, fixture, reduceMotion);
     minuteLabel.textContent = `${event.minute}'`;
+    const sentence = commentate(event, season);
     const item = document.createElement("li");
-    item.textContent = commentate(event, season);
+    item.textContent = sentence;
     log.append(item);
+    const highlightSrc = HIGHLIGHTS[event.type === "pass" ? "key-pass" : event.type];
+    if (highlightSrc) {
+      const image = document.createElement("img");
+      image.src = highlightSrc;
+      image.alt = sentence;
+      highlight.append(image);
+      highlight.hidden = false;
+    }
     log.scrollTop = log.scrollHeight;
     await new Promise((resolve) => setTimeout(resolve, reduceMotion ? 600 : 60));
   }
