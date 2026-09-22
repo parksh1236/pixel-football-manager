@@ -5,6 +5,10 @@ import {
   completeRound,
   createSchedule,
   createSeason,
+  FORMATIONS,
+  formationPositions,
+  migrateSeason,
+  movePlayer,
   swapStarter,
 } from "./game.js";
 
@@ -41,4 +45,27 @@ test("a completed round cannot be awarded twice", () => {
   const second = completeRound(first.season, () => 0.5, 0);
   assert.equal(second.season.round, 1);
   assert.equal(second.alreadyCompleted, true);
+});
+
+test("every formation supplies eleven unique legal positions", () => {
+  for (const name of Object.keys(FORMATIONS)) {
+    const positions = formationPositions(name);
+    assert.equal(positions.length, 11);
+    assert.equal(new Set(positions.map(({ playerId }) => playerId)).size, 11);
+    assert.ok(positions.every(({ x, y }) => x >= 0 && x <= 100 && y >= 0 && y <= 100));
+  }
+});
+
+test("goalkeeper movement is clamped to its penalty area", () => {
+  const next = movePlayer(createSeason(), "player-0", 80, 50);
+  assert.ok(next.customPositions["player-0"].x <= 18);
+});
+
+test("version one saves migrate to version two with a formation", () => {
+  const old = createSeason();
+  old.version = 1;
+  const next = migrateSeason(old);
+  assert.equal(next.version, 2);
+  assert.equal(next.formation, "4-3-3");
+  assert.equal(Object.keys(next.customPositions).length, 11);
 });

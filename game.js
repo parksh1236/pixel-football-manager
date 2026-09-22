@@ -23,6 +23,86 @@ const POSITIONS = [
 const groupFor = (position) => (position === "GK" ? "GK" : position);
 const clone = (value) => structuredClone(value);
 
+const FOUR_THREE_THREE = [
+  [8, 50, "GK"], [26, 18, "RB"], [24, 39, "RCB"], [24, 61, "LCB"], [26, 82, "LB"],
+  [52, 24, "RCM"], [50, 50, "CM"], [52, 76, "LCM"], [78, 20, "RW"], [82, 50, "ST"], [78, 80, "LW"],
+];
+const FOUR_TWO_THREE_ONE = [
+  [8, 50, "GK"], [26, 18, "RB"], [24, 39, "RCB"], [24, 61, "LCB"], [26, 82, "LB"],
+  [45, 35, "RDM"], [45, 65, "LDM"], [66, 20, "RW"], [68, 50, "CAM"], [66, 80, "LW"], [84, 50, "ST"],
+];
+const THREE_FIVE_TWO = [
+  [8, 50, "GK"], [25, 28, "RCB"], [22, 50, "CB"], [25, 72, "LCB"], [50, 15, "RWB"],
+  [48, 35, "RCM"], [50, 50, "CM"], [48, 65, "LCM"], [50, 85, "LWB"], [78, 35, "RS"], [78, 65, "LS"],
+];
+const FOUR_FOUR_TWO = [
+  [8, 50, "GK"], [26, 18, "RB"], [24, 39, "RCB"], [24, 61, "LCB"], [26, 82, "LB"],
+  [52, 18, "RM"], [48, 40, "RCM"], [48, 60, "LCM"], [52, 82, "LM"], [78, 38, "RS"], [78, 62, "LS"],
+];
+const FIVE_THREE_TWO = [
+  [8, 50, "GK"], [28, 12, "RWB"], [24, 30, "RCB"], [22, 50, "CB"], [24, 70, "LCB"],
+  [28, 88, "LWB"], [52, 30, "RCM"], [50, 50, "CM"], [52, 70, "LCM"], [78, 38, "RS"], [78, 62, "LS"],
+];
+
+const positionSet = (positions) => positions.map(([x, y, role], index) => ({
+  playerId: `player-${index}`,
+  x,
+  y,
+  role,
+}));
+
+export const FORMATIONS = {
+  "4-3-3": positionSet(FOUR_THREE_THREE),
+  "4-2-3-1": positionSet(FOUR_TWO_THREE_ONE),
+  "3-5-2": positionSet(THREE_FIVE_TWO),
+  "4-4-2": positionSet(FOUR_FOUR_TWO),
+  "5-3-2": positionSet(FIVE_THREE_TWO),
+};
+
+const clamp = (value, min, max) => Math.max(min, Math.min(max, Number(value)));
+const validCoordinate = (value) => Number.isFinite(Number(value)) && Number(value) >= 0 && Number(value) <= 100;
+
+export function formationPositions(name) {
+  return clone(FORMATIONS[name] || FORMATIONS["4-3-3"]);
+}
+
+const defaultCustomPositions = (formation) => Object.fromEntries(
+  formationPositions(formation).map((position) => [position.playerId, position]),
+);
+
+function legalPosition(playerId, x, y, role) {
+  const position = { playerId, x: clamp(x, 0, 100), y: clamp(y, 0, 100), role };
+  if (playerId === "player-0") {
+    position.x = clamp(x, 0, 18);
+    position.y = clamp(y, 21, 79);
+  }
+  return position;
+}
+
+export function movePlayer(season, playerId, x, y) {
+  const next = migrateSeason(season);
+  const current = next.customPositions[playerId];
+  if (!current) return next;
+  next.customPositions[playerId] = legalPosition(playerId, x, y, current.role);
+  return next;
+}
+
+export function migrateSeason(value) {
+  const next = clone(value);
+  const formation = FORMATIONS[next.formation] ? next.formation : "4-3-3";
+  const defaults = defaultCustomPositions(formation);
+  const saved = next.customPositions || {};
+  next.version = 2;
+  next.formation = formation;
+  next.customPositions = Object.fromEntries(Object.entries(defaults).map(([playerId, fallback]) => {
+    const position = saved[playerId];
+    const valid = position && validCoordinate(position.x) && validCoordinate(position.y)
+      && (playerId !== "player-0" || (Number(position.x) <= 18 && Number(position.y) >= 21 && Number(position.y) <= 79));
+    return [playerId, valid ? legalPosition(playerId, position.x, position.y, position.role || fallback.role) : fallback];
+  }));
+  return next;
+}
+
 export function createSchedule(teamIds) {
   const rotation = [...teamIds];
   const firstLeg = [];
@@ -76,9 +156,11 @@ export function createSeason() {
   }));
 
   return {
-    version: 1,
+    version: 2,
     round: 0,
     tactic: "balanced",
+    formation: "4-3-3",
+    customPositions: defaultCustomPositions("4-3-3"),
     teams,
     players,
     fixtures: createSchedule(teams.map(({ id }) => id)),
