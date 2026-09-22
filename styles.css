@@ -88,6 +88,18 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--amber); outline
 .vs-mark { color: var(--amber); font-weight: 900; font-size: 1.4rem; }
 
 .tactics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 22px; }
+.formation-editor { margin-top: 22px; }
+.formation-buttons { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.editor-help { margin: 9px 0; color: var(--muted); font-size: .7rem; line-height: 1.5; }
+.editor-status { min-height: 1.5em; margin: 9px 0 0; color: var(--green); font-size: .7rem; }
+.formation-pitch { position: relative; width: 100%; aspect-ratio: 16 / 8; border: 2px solid #7cb99a; background: repeating-linear-gradient(90deg, #174c37 0 10%, #1b5940 10% 20%); overflow: hidden; }
+.formation-pitch::before { content: ""; position: absolute; inset: 5%; border: 1px solid #9ed3b6; pointer-events: none; }
+.formation-marker { position: absolute; left: calc(var(--x) * 1%); top: calc(var(--y) * 1%); display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 2px solid #041109; border-radius: 50%; color: #041109; background: var(--green); box-shadow: 2px 2px 0 #02050a; font-size: .62rem; font-weight: 900; line-height: 1; transform: translate(-50%, -50%); cursor: grab; touch-action: none; }
+.formation-marker span { position: absolute; top: 36px; color: var(--ink); font-size: .56rem; text-shadow: 1px 1px #000; pointer-events: none; }
+.formation-marker.goalkeeper { background: var(--amber); }
+.formation-marker:active { cursor: grabbing; }
+.formation-marker:focus-visible { z-index: 2; outline: 3px solid #fff; outline-offset: 2px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .choice-button, .primary-button, .secondary-button {
   min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); color: var(--ink); background: #101d2a; box-shadow: 2px 2px 0 #02050a; cursor: pointer;
 }
@@ -158,6 +170,9 @@ tr.user-row { color: var(--green); background: #10251e; }
   .versus { gap: 8px; }
   .crest { width: 56px; height: 56px; }
   .tactics { grid-template-columns: 1fr; }
+  .formation-buttons { grid-template-columns: repeat(3, 1fr); }
+  .formation-marker { width: 30px; height: 30px; }
+  .formation-marker span { top: 31px; }
   .fixture-row { grid-template-columns: 1fr 54px 1fr; font-size: .72rem; }
   .highlight { position: static; width: 100%; border-width: 1px 0; box-shadow: none; }
 }

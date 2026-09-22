@@ -1,4 +1,4 @@
-import { calculateTable, commentate, completeRound, createSeason, formationPositions, lineupPositions, migrateSeason, swapStarter } from "./game.js";
+import { calculateTable, commentate, completeRound, createSeason, FORMATIONS, formationPositions, lineupPositions, migrateSeason, movePlayer, swapStarter } from "./game.js";
 
 const STORAGE_KEY = "pixel-manager-season-v1";
 const app = document.querySelector("#app");
@@ -6,6 +6,7 @@ const saveStatus = document.querySelector("#save-status");
 const roundStatus = document.querySelector("#round-status");
 let activeView = "dashboard";
 let matchRunning = false;
+let draggedMarker = null;
 
 const HIGHLIGHTS = {
   shot: "assets/highlights/shot.png",
@@ -69,6 +70,8 @@ function renderDashboard() {
   const table = calculateTable(season);
   const userRow = table.find(({ teamId }) => teamId === "team-0");
   const recent = season.fixtures.flat().filter((item) => item.result && (item.home === "team-0" || item.away === "team-0")).slice(-5);
+  const slots = formationPositions(season.formation).map((slot) => season.customPositions[slot.playerId] || slot);
+  const lineup = lineupPositions(season);
   app.innerHTML = `${header("MATCHDAY CONTROL", "선발과 전술을 정하고 다음 경기를 지휘하세요.", `ROUND ${String(season.round + 1).padStart(2, "0")}`)}
     <div class="grid dashboard-grid">
       <section class="panel">
@@ -78,6 +81,16 @@ function renderDashboard() {
             <div><span class="crest" style="color:${home.color}">${home.short}</span><span class="team-name">${home.name}</span><span class="team-rating">POWER ${home.rating}</span></div>
             <span class="vs-mark">VS</span>
             <div><span class="crest" style="color:${away.color}">${away.short}</span><span class="team-name">${away.name}</span><span class="team-rating">POWER ${away.rating}</span></div>
+          </div>
+          <div class="formation-editor">
+            <div class="formation-buttons" aria-label="포메이션 선택">
+              ${Object.keys(FORMATIONS).map((formation) => `<button class="choice-button" data-formation="${formation}" aria-pressed="${season.formation === formation}">${formation}</button>`).join("")}
+            </div>
+            <p class="editor-help" id="editor-help">선수 마커를 드래그하거나 초점을 맞춘 뒤 방향키로 3%씩 이동하세요. 골키퍼는 페널티 구역 안에서만 움직입니다.</p>
+            <div class="formation-pitch" id="formation-pitch" aria-label="선발 11명 위치 편집" aria-describedby="editor-help">
+              ${slots.map((slot, index) => { const player = season.players.find(({ id }) => id === lineup[index].playerId); return `<button class="formation-marker${slot.playerId === "player-0" ? " goalkeeper" : ""}" data-slot="${slot.playerId}" style="--x:${slot.x};--y:${slot.y}" aria-label="${player?.name || slot.role}, ${slot.role}, 위치 ${slot.x}, ${slot.y}">${player?.name.slice(-2) || slot.role}<span>${slot.role}</span></button>`; }).join("")}
+            </div>
+            <p class="editor-status" id="position-status" aria-live="polite">선수를 선택해 위치를 조정하세요.</p>
           </div>
           <div class="tactics" aria-label="전술 선택">
             ${[["attacking", "공격형"], ["balanced", "균형형"], ["defensive", "수비형"]].map(([value, label]) => `<button class="choice-button tactic" data-tactic="${value}" aria-pressed="${season.tactic === value}">${label}</button>`).join("")}
@@ -91,6 +104,27 @@ function renderDashboard() {
         <section class="panel"><div class="panel-header"><h2>TOP TABLE</h2></div>${tableMarkup(4)}</section>
       </div>
     </div>`;
+}
+
+function positionMarker(marker, x, y) {
+  season = movePlayer(season, marker.dataset.slot, x, y);
+  const position = season.customPositions[marker.dataset.slot];
+  marker.style.setProperty("--x", position.x);
+  marker.style.setProperty("--y", position.y);
+  const playerName = marker.getAttribute("aria-label").split(",")[0];
+  marker.setAttribute("aria-label", `${playerName}, ${position.role}, 위치 ${position.x}, ${position.y}`);
+  const status = document.querySelector("#position-status");
+  if (status) status.textContent = `${playerName} 위치 ${position.x}, ${position.y}`;
+}
+
+function pointerPosition(event) {
+  const pitch = document.querySelector("#formation-pitch");
+  if (!pitch) return null;
+  const bounds = pitch.getBoundingClientRect();
+  return {
+    x: (event.clientX - bounds.left) / bounds.width * 100,
+    y: (event.clientY - bounds.top) / bounds.height * 100,
+  };
 }
 
 function renderSquad() {
@@ -252,9 +286,15 @@ document.querySelector(".sidebar").addEventListener("click", (event) => {
 });
 
 app.addEventListener("click", (event) => {
+  const formation = event.target.closest("[data-formation]");
   const tactic = event.target.closest("[data-tactic]");
   const player = event.target.closest("[data-player]");
-  if (tactic) {
+  if (formation) {
+    season.formation = formation.dataset.formation;
+    season.customPositions = Object.fromEntries(formationPositions(season.formation).map((position) => [position.playerId, position]));
+    saveSeason();
+    renderDashboard();
+  } else if (tactic) {
     season.tactic = tactic.dataset.tactic;
     saveSeason();
     renderDashboard();
@@ -274,6 +314,40 @@ app.addEventListener("click", (event) => {
   } else if (event.target.closest("#match-complete")) {
     renderDashboard();
   }
+});
+
+app.addEventListener("pointerdown", (event) => {
+  const marker = event.target.closest("[data-slot]");
+  if (!marker) return;
+  draggedMarker = marker;
+  marker.setPointerCapture(event.pointerId);
+  event.preventDefault();
+});
+
+app.addEventListener("pointermove", (event) => {
+  if (!draggedMarker) return;
+  const position = pointerPosition(event);
+  if (position) positionMarker(draggedMarker, position.x, position.y);
+});
+
+app.addEventListener("pointerup", () => {
+  if (!draggedMarker) return;
+  draggedMarker = null;
+  saveSeason();
+});
+
+app.addEventListener("pointercancel", () => {
+  draggedMarker = null;
+});
+
+app.addEventListener("keydown", (event) => {
+  const marker = event.target.closest("[data-slot]");
+  const moves = { ArrowLeft: [-3, 0], ArrowRight: [3, 0], ArrowUp: [0, -3], ArrowDown: [0, 3] };
+  if (!marker || !moves[event.key]) return;
+  event.preventDefault();
+  const current = season.customPositions[marker.dataset.slot];
+  positionMarker(marker, current.x + moves[event.key][0], current.y + moves[event.key][1]);
+  saveSeason();
 });
 
 window.addEventListener("resize", () => {
