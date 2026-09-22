@@ -39,14 +39,20 @@ test("opponent events never borrow a user player identity", () => {
   assert.doesNotMatch(commentate(opponentEvent, season), /임성민|강민준|윤태호/);
 });
 
-test("formation slots are assigned to the current starters", () => {
+test("every formation assigns each current starter exactly once", () => {
   const season = createSeason();
   const substitute = season.players.find(({ starter, position }) => !starter && position !== "GK");
   const next = swapStarter(season, substitute.id);
-  const positions = lineupPositions(next);
-  assert.equal(positions.length, 11);
-  assert.ok(positions.some(({ playerId }) => playerId === substitute.id));
-  assert.ok(positions.every(({ playerId }) => next.players.find((player) => player.id === playerId)?.starter));
+  const starterIds = next.players.filter(({ starter }) => starter).map(({ id }) => id).sort();
+  for (const formation of Object.keys(FORMATIONS)) {
+    next.formation = formation;
+    next.customPositions = Object.fromEntries(formationPositions(formation).map((position) => [position.playerId, position]));
+    const positions = lineupPositions(next);
+    const assignedIds = positions.map(({ playerId }) => playerId);
+    assert.equal(positions.length, 11, formation);
+    assert.equal(new Set(assignedIds).size, 11, formation);
+    assert.deepEqual([...assignedIds].sort(), starterIds, formation);
+  }
 });
 
 test("eight teams produce fourteen rounds and 56 fixtures", () => {

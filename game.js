@@ -94,12 +94,16 @@ const roleGroup = (role) => role === "GK" ? "GK" : role.includes("B") ? "DF" : r
 
 export function lineupPositions(season) {
   const slots = formationPositions(season.formation).map((slot) => season.customPositions?.[slot.playerId] || slot);
-  const starters = season.players.filter(({ starter }) => starter);
-  const pools = starters.reduce((groups, player) => {
-    (groups[groupFor(player.position)] ||= []).push(player);
-    return groups;
-  }, {});
-  return slots.map((slot) => ({ ...slot, playerId: pools[roleGroup(slot.role)]?.shift()?.id || slot.playerId }));
+  const unused = season.players.filter(({ starter }) => starter);
+  const assignments = new Map();
+  const ordered = [...slots].sort((a, b) => Number(a.role.includes("WB")) - Number(b.role.includes("WB")));
+  for (const slot of ordered) {
+    const groups = slot.role.includes("WB") ? ["DF", "MF"] : [roleGroup(slot.role)];
+    let index = unused.findIndex(({ position }) => groups.includes(groupFor(position)));
+    if (index < 0) index = 0;
+    assignments.set(slot.playerId, unused.splice(index, 1)[0]?.id || slot.playerId);
+  }
+  return slots.map((slot) => ({ ...slot, playerId: assignments.get(slot.playerId) }));
 }
 
 export function migrateSeason(value) {
