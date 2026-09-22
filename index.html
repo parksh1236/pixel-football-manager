@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#08111f">
+  <title>PIXEL TOUCHLINE</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#app">본문으로 건너뛰기</a>
+  <div class="game-shell">
+    <header class="topbar">
+      <div class="brand" aria-label="Pixel Touchline">
+        <span class="brand-mark" aria-hidden="true">PT</span>
+        <div><strong>PIXEL TOUCHLINE</strong><small>FOOTBALL MANAGER</small></div>
+      </div>
+      <div class="club-status">
+        <span id="club-name">서울 네온 FC</span>
+        <strong id="round-status">ROUND 01 / 14</strong>
+        <span id="save-status" role="status" aria-live="polite">저장 준비</span>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <nav class="sidebar" aria-label="게임 메뉴">
+        <p class="eyebrow">MANAGER MENU</p>
+        <button class="nav-button active" data-view="dashboard" aria-pressed="true"><span>01</span> 대시보드</button>
+        <button class="nav-button" data-view="squad" aria-pressed="false"><span>02</span> 선수단</button>
+        <button class="nav-button" data-view="fixtures" aria-pressed="false"><span>03</span> 일정</button>
+        <button class="nav-button" data-view="table" aria-pressed="false"><span>04</span> 순위표</button>
+        <div class="manager-card">
+          <span class="pixel-avatar" aria-hidden="true">▦</span>
+          <div><small>HEAD COACH</small><strong>MANAGER 01</strong></div>
+        </div>
+      </nav>
+
+      <main id="app" tabindex="-1"></main>
+    </div>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
