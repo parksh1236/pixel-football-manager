@@ -28,7 +28,7 @@ function validManagerWorld(world) {
       && typeof team.short === "string" && typeof team.color === "string" && Number.isFinite(team.rating))
     && world.players.every((player) => isRecord(player)
       && typeof player.id === "string" && typeof player.name === "string"
-      && typeof player.position === "string" && Number.isFinite(player.rating)
+      && ["GK", "DF", "MF", "FW"].includes(player.position) && Number.isFinite(player.rating)
       && Number.isFinite(player.condition) && typeof player.starter === "boolean")
     && world.fixtures.every((round) => Array.isArray(round) && round.length === 4
       && round.every((fixture) => isRecord(fixture) && teamIds.has(fixture.home) && teamIds.has(fixture.away))

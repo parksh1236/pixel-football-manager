@@ -25,6 +25,17 @@ test("a corrupt middle slot leaves neighboring slots available", () => {
   assert.equal(parsed[2].slot.name, "third");
 });
 
+test("an invalid manager player position leaves neighboring slots available", () => {
+  const broken = slot("broken");
+  broken.world.players[0].position = "INVALID";
+
+  const parsed = parseSlots([slot("first"), broken, slot("third")]);
+
+  assert.deepEqual(parsed.map(({ ok }) => ok), [true, false, true]);
+  assert.equal(parsed[0].slot.name, "first");
+  assert.equal(parsed[2].slot.name, "third");
+});
+
 test("adding a fourth slot reports Korean capacity without replacing a save", () => {
   const slots = [slot("first"), slot("second"), slot("third")];
 
