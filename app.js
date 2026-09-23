@@ -1,5 +1,6 @@
 import { calculateTable, commentate, completeRound, createSeason, FORMATIONS, formationPositions, formationSuitability, interpolateMatchState, lineupPositions, matchVisualState, migrateSeason, movePlayer, pitchPoint, scoreForEvents, swapStarter } from "./game.js";
 import { assignCareerClub, createCareerSlot, LEGACY_STORAGE_KEY, loadCareerStore, MAX_SLOTS, migrateLegacySave, parseSlots, saveCareerStore, updateActiveSlot } from "./career.js";
+import { ARCHETYPES, createCareerPlayer, createEntryOffers, validatePlayerDraft } from "./player-career.js";
 
 const app = document.querySelector("#app");
 const saveStatus = document.querySelector("#save-status");
@@ -18,6 +19,10 @@ let startView = "home";
 let selectedMode = "manager";
 let createSlotIndex = 0;
 let creationWorld = null;
+let playerCreationStep = 1;
+let playerCreationError = "";
+let playerOfferState = null;
+let playerDraft = null;
 let careerStore;
 let statusMessage = "저장 준비";
 let season = createSeason();
@@ -29,6 +34,14 @@ const HIGHLIGHTS = {
   goal: "assets/highlights/celebration.png",
 };
 const highlightImages = {};
+const POSITION_LABELS = {
+  GK: "골키퍼", RB: "오른쪽 수비", CB: "중앙 수비", LB: "왼쪽 수비", DM: "수비형 미드필더",
+  CM: "중앙 미드필더", AM: "공격형 미드필더", RW: "오른쪽 윙", LW: "왼쪽 윙", ST: "스트라이커",
+};
+const ATTRIBUTE_LABELS = {
+  pace: "속도", finishing: "골 결정력", passing: "패스", dribbling: "드리블", vision: "시야", flair: "천재성",
+  tackling: "태클", marking: "마크", strength: "몸싸움", stamina: "활동량", heading: "헤딩", reflexes: "반사 신경",
+};
 const highlightsReady = Promise.all(Object.entries(HIGHLIGHTS).map(async ([type, src]) => {
   const image = new Image();
   image.src = src;
@@ -43,6 +56,26 @@ const highlightsReady = Promise.all(Object.entries(HIGHLIGHTS).map(async ([type,
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
 }[character]));
+
+function resetPlayerCreation() {
+  playerCreationStep = 1;
+  playerCreationError = "";
+  playerOfferState = null;
+  playerDraft = {
+    name: "",
+    nationality: "대한민국",
+    age: 18,
+    height: 178,
+    foot: "right",
+    appearance: "short-dark",
+    preferredPosition: "AM",
+    secondaryPositions: ["CM", "RW"],
+    archetype: "playmaker",
+    adjustments: { vision: 4, passing: 3, flair: 3, tackling: -4, strength: -3, heading: -3 },
+    entryPath: "club-choice",
+    selectedClubId: "team-0",
+  };
+}
 
 function normalizeStore(activeSlotId, slots) {
   const slotResults = parseSlots(slots);
@@ -167,6 +200,68 @@ function clubOptions(selected = "team-0") {
   return creationWorld.teams.map((club) => `<option value="${club.id}" ${club.id === selected ? "selected" : ""}>${escapeHtml(club.name)}</option>`).join("");
 }
 
+function playerStepProgress() {
+  return `<ol class="creation-progress" aria-label="선수 생성 진행 단계">
+    ${["기본 정보", "포지션", "선수 유형", "능력 조정"].map((label, index) => `<li class="${index + 1 === playerCreationStep ? "current" : index + 1 < playerCreationStep ? "complete" : ""}" ${index + 1 === playerCreationStep ? 'aria-current="step"' : ""}><span>${index + 1}</span>${label}</li>`).join("")}
+  </ol>`;
+}
+
+function playerFormActions(submitLabel = "다음") {
+  return `<div class="creation-actions">
+    ${playerCreationStep > 1 ? '<button class="secondary-button" data-player-back type="button">이전</button>' : ""}
+    <button class="primary-button" type="submit">${submitLabel}</button>
+  </div>`;
+}
+
+function renderPlayerCreationStep() {
+  let fields;
+  if (playerCreationStep === 1) {
+    fields = `<fieldset><legend>1. 기본 정보</legend>
+      <div class="form-grid">
+        <label>선수 이름<input name="name" minlength="2" maxlength="30" required autocomplete="name" value="${escapeHtml(playerDraft.name)}"></label>
+        <label>국가<input name="nationality" minlength="2" maxlength="30" required value="${escapeHtml(playerDraft.nationality)}"></label>
+        <label>시작 나이<input name="age" type="number" min="16" max="25" step="1" required value="${playerDraft.age}"></label>
+        <label>키 (cm)<input name="height" type="number" min="150" max="210" step="1" required value="${playerDraft.height}"></label>
+        <label>주발<select name="foot"><option value="right" ${playerDraft.foot === "right" ? "selected" : ""}>오른발</option><option value="left" ${playerDraft.foot === "left" ? "selected" : ""}>왼발</option></select></label>
+        <label>외형<select name="appearance"><option value="short-dark" ${playerDraft.appearance === "short-dark" ? "selected" : ""}>짧은 검은 머리</option><option value="wavy-brown" ${playerDraft.appearance === "wavy-brown" ? "selected" : ""}>갈색 웨이브</option><option value="buzz-cut" ${playerDraft.appearance === "buzz-cut" ? "selected" : ""}>스포츠 컷</option></select></label>
+      </div>
+    </fieldset>${playerFormActions()}`;
+  } else if (playerCreationStep === 2) {
+    fields = `<fieldset><legend>2. 포지션</legend>
+      <label>주 포지션<select name="preferredPosition">${Object.entries(POSITION_LABELS).map(([value, label]) => `<option value="${value}" ${playerDraft.preferredPosition === value ? "selected" : ""}>${value} · ${label}</option>`).join("")}</select></label>
+      <fieldset class="choice-fieldset"><legend>보조 포지션 (최대 2개)</legend><div class="check-grid">
+        ${Object.entries(POSITION_LABELS).map(([value, label]) => `<label><input type="checkbox" name="secondaryPositions" value="${value}" ${playerDraft.secondaryPositions.includes(value) ? "checked" : ""}>${value} · ${label}</label>`).join("")}
+      </div></fieldset>
+    </fieldset>${playerFormActions()}`;
+  } else if (playerCreationStep === 3) {
+    fields = `<fieldset><legend>3. 선수 유형</legend><div class="archetype-grid">
+      ${Object.entries(ARCHETYPES).map(([value, item]) => `<label class="archetype-card"><input type="radio" name="archetype" value="${value}" ${playerDraft.archetype === value ? "checked" : ""} required><strong>${item.label}</strong><span>${item.description}</span><small>주요 능력 ${Object.entries(item.attributes).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name, score]) => `${ATTRIBUTE_LABELS[name]} ${score}`).join(" · ")}</small></label>`).join("")}
+    </div></fieldset>${playerFormActions()}`;
+  } else {
+    const base = ARCHETYPES[playerDraft.archetype].attributes;
+    const values = Object.values(playerDraft.adjustments);
+    const positive = values.filter((value) => value > 0).reduce((sum, value) => sum + value, 0);
+    const balance = values.reduce((sum, value) => sum + value, 0);
+    const offers = playerOfferState ? `<section class="offer-list" aria-labelledby="offer-heading"><h3 id="offer-heading">입단 제안</h3>${playerOfferState.offers.map((offer, index) => `<article class="offer-card"><div><strong>${escapeHtml(offer.clubName)}</strong><span>${offer.role}</span></div><dl><div><dt>주급</dt><dd>₩${offer.wage.toLocaleString("ko-KR")}</dd></div><div><dt>기간</dt><dd>${offer.years}년</dd></div></dl><button type="button" class="primary-button" data-offer-index="${index}">이 제안 수락</button></article>`).join("")}</section>` : "";
+    fields = `<fieldset><legend>4. 능력 조정과 시작 경로</legend>
+      <p class="point-summary" id="point-summary" aria-live="polite">더한 포인트 <strong>${positive}/10</strong> · 총 조정 <strong>${balance}</strong></p>
+      <div class="attribute-grid">${Object.entries(base).map(([name, score]) => {
+        const adjustment = playerDraft.adjustments[name] || 0;
+        return `<label>${ATTRIBUTE_LABELS[name]} <small>기본 ${score} → <output data-final-attribute="${name}">${score + adjustment}</output></small><input name="adjustment-${name}" type="number" min="-${Math.min(10, score - 1)}" max="${Math.min(10, 20 - score)}" step="1" required value="${adjustment}"></label>`;
+      }).join("")}</div>
+      <fieldset class="choice-fieldset"><legend>시작 경로</legend><div class="entry-paths">
+        ${[["club-choice", "구단 선택", "선택한 구단과 즉시 계약"], ["trial", "입단 테스트", "적합한 구단 최대 3곳의 제안"], ["free-agent", "자유계약", "관심 구단의 조건 비교"]].map(([value, label, help]) => `<label><input type="radio" name="entryPath" value="${value}" ${playerDraft.entryPath === value ? "checked" : ""}><strong>${label}</strong><span>${help}</span></label>`).join("")}
+      </div></fieldset>
+      <label>구단 선택 경로의 희망 구단<select name="selectedClubId">${clubOptions(playerDraft.selectedClubId)}</select></label>
+    </fieldset>${offers}${playerFormActions(playerOfferState ? "제안 다시 확인" : "입단 제안 확인")}`;
+  }
+
+  return `${playerStepProgress()}<form class="career-form player-create-form" id="player-create-form">
+    <p class="form-error" id="player-create-error" role="alert" tabindex="-1" ${playerCreationError ? "" : "hidden"}>${escapeHtml(playerCreationError)}</p>
+    ${fields}
+  </form>`;
+}
+
 function renderCreate() {
   const form = selectedMode === "manager"
     ? `<form class="career-form" id="manager-create-form">
@@ -175,12 +270,7 @@ function renderCreate() {
         <label>담당 구단<select name="clubId">${clubOptions()}</select></label>
         <button class="primary-button" type="submit">감독 커리어 시작</button>
       </form>`
-    : `<form class="career-form" id="player-create-route" data-route="player-create">
-        <p>선수 생성 기능은 이후 단계에서 확장됩니다. 지금은 이름과 시작 구단으로 저장 슬롯을 만듭니다.</p>
-        <label>선수 이름<input name="name" maxlength="30" required></label>
-        <label>시작 구단<select name="clubId">${clubOptions()}</select></label>
-        <button class="primary-button" type="submit">선수 커리어 시작</button>
-      </form>`;
+    : renderPlayerCreationStep();
   app.innerHTML = `${header("NEW CAREER", `SLOT ${createSlotIndex + 1}에 새 커리어를 만듭니다.`, "CREATE")}
     <div class="mode-picker" aria-label="커리어 모드 선택">
       <button class="choice-button" data-career-mode="manager" aria-pressed="${selectedMode === "manager"}">감독 모드</button>
@@ -191,14 +281,24 @@ function renderCreate() {
 
 function renderPlayerCareer() {
   const slot = activeSlotResult().slot;
+  const player = slot.career.player;
+  if (!player) {
+    app.innerHTML = `${header("PLAYER CAREER", `${escapeHtml(slot.name)}의 선수 커리어입니다.`, "PLAYER MODE")}
+      <section class="panel player-profile"><div class="panel-body"><p>선수 정보가 없는 이전 저장입니다. 새 선수 커리어를 만들어 주세요.</p></div></section>`;
+    return;
+  }
   app.innerHTML = `${header("PLAYER CAREER", `${escapeHtml(slot.name)}의 선수 커리어입니다.`, "PLAYER MODE")}
-    <section class="panel player-placeholder"><div class="panel-body"><span class="mode-badge">SLOT ${activeSlotResult().index + 1}</span><h2>선수 생성 경로 연결 완료</h2><p>훈련, 경기 출전, 계약 화면은 다음 구현 단계에서 이 경로에 연결됩니다.</p></div></section>`;
+    <div class="player-profile-grid">
+      <section class="panel player-profile"><div class="panel-body"><span class="mode-badge">SLOT ${activeSlotResult().index + 1}</span><h2>${escapeHtml(player.name)}</h2><p>${escapeHtml(player.nationality)} · ${player.age}세 · ${player.height}cm · ${player.foot === "right" ? "오른발" : "왼발"}</p><dl><div><dt>소속</dt><dd>${escapeHtml(slotClub(slot))}</dd></div><div><dt>포지션</dt><dd>${player.preferredPosition}${player.secondaryPositions.length ? ` / ${player.secondaryPositions.join(" · ")}` : ""}</dd></div><div><dt>선수 유형</dt><dd>${ARCHETYPES[player.archetype].label}</dd></div><div><dt>역할</dt><dd>${escapeHtml(player.contract.role)}</dd></div><div><dt>주급</dt><dd>₩${player.wage.toLocaleString("ko-KR")}</dd></div><div><dt>계약</dt><dd>${player.contract.years}년</dd></div></dl></div></section>
+      <section class="panel"><div class="panel-header"><h2>PLAYER ATTRIBUTES</h2><span class="kicker">OVERALL ${player.overall}</span></div><div class="panel-body attribute-summary">${Object.entries(player.attributes).map(([name, value]) => `<div><span>${ATTRIBUTE_LABELS[name]}</span><strong>${value}</strong></div>`).join("")}</div></section>
+    </div>`;
 }
 
 function beginCreation(index) {
   createSlotIndex = index;
   selectedMode = "manager";
   creationWorld = createSeason();
+  resetPlayerCreation();
   screen = "create";
   render();
   app.focus();
@@ -207,7 +307,7 @@ function beginCreation(index) {
 function activateSlot(index) {
   const result = careerStore.slotResults[index];
   if (!result?.ok) return;
-  season = result.slot.mode === "manager" ? migrateSeason(result.slot.world) : createSeason();
+  season = migrateSeason(result.slot.world);
   const next = normalizeStore(result.slot.id, careerStore.slots);
   const saved = saveCareerStore(localStorage, next);
   careerStore = next;
@@ -236,6 +336,103 @@ function createCareer(form) {
   careerStore = next;
   season = migrateSeason(slot.world);
   statusMessage = saved.ok ? "새 커리어 저장 완료" : saved.error;
+  screen = "active";
+  activeView = "dashboard";
+  render();
+  app.focus();
+}
+
+function playerCreationFailure(message) {
+  playerCreationError = message;
+  renderCreate();
+  document.querySelector("#player-create-error")?.focus();
+}
+
+function submitPlayerCreationStep(form) {
+  const data = new FormData(form);
+  playerCreationError = "";
+  playerOfferState = null;
+
+  if (playerCreationStep === 1) {
+    playerDraft = {
+      ...playerDraft,
+      name: String(data.get("name") || "").trim(),
+      nationality: String(data.get("nationality") || "").trim(),
+      age: Number(data.get("age")),
+      height: Number(data.get("height")),
+      foot: String(data.get("foot")),
+      appearance: String(data.get("appearance")),
+    };
+  } else if (playerCreationStep === 2) {
+    const preferredPosition = String(data.get("preferredPosition"));
+    const secondaryPositions = data.getAll("secondaryPositions").map(String);
+    playerDraft = { ...playerDraft, preferredPosition, secondaryPositions };
+    if (secondaryPositions.length > 2 || secondaryPositions.includes(preferredPosition)) {
+      playerCreationFailure("보조 포지션은 주 포지션과 다른 두 개 이하로 선택하세요.");
+      return;
+    }
+  } else if (playerCreationStep === 3) {
+    playerDraft = { ...playerDraft, archetype: String(data.get("archetype")) };
+  } else {
+    const base = ARCHETYPES[playerDraft.archetype].attributes;
+    const adjustments = Object.fromEntries(Object.keys(base).map((name) => [name, Number(data.get(`adjustment-${name}`))]));
+    const entryPath = String(data.get("entryPath"));
+    const selectedClubId = String(data.get("selectedClubId"));
+    playerDraft = { ...playerDraft, adjustments, entryPath, selectedClubId };
+    const validation = validatePlayerDraft(playerDraft);
+    if (!validation.ok) {
+      playerCreationFailure(validation.errors.join(" "));
+      return;
+    }
+    const player = createCareerPlayer(playerDraft);
+    const teams = entryPath === "club-choice"
+      ? creationWorld.teams.filter(({ id }) => id === selectedClubId)
+      : creationWorld.teams;
+    const offers = createEntryOffers(player, entryPath, teams);
+    if (!offers.length) {
+      playerCreationFailure("조건에 맞는 입단 제안이 없습니다. 시작 경로를 바꿔 보세요.");
+      return;
+    }
+    playerOfferState = { player, path: entryPath, offers };
+    renderCreate();
+    document.querySelector("#offer-heading")?.scrollIntoView({ block: "nearest" });
+    return;
+  }
+
+  playerCreationStep += 1;
+  renderCreate();
+  document.querySelector("#player-create-form input, #player-create-form select")?.focus();
+}
+
+function acceptPlayerOffer(index) {
+  const offer = playerOfferState?.offers[index];
+  if (!offer) return;
+  const world = assignCareerClub(creationWorld, offer.clubId);
+  const player = {
+    ...playerOfferState.player,
+    clubId: "team-0",
+    wage: offer.wage,
+    contract: { clubId: "team-0", role: offer.role, wage: offer.wage, years: offer.years },
+  };
+  const career = {
+    clubId: "team-0",
+    selectedClubId: offer.clubId,
+    entryPath: playerOfferState.path,
+    entryOffer: offer,
+    player,
+  };
+  const slot = createCareerSlot("player", player.name, world, career);
+  const slots = [...careerStore.slots];
+  slots[createSlotIndex] = slot;
+  const next = normalizeStore(slot.id, slots);
+  const saved = saveCareerStore(localStorage, next);
+  if (!saved.ok) {
+    playerCreationFailure(saved.error);
+    return;
+  }
+  careerStore = next;
+  season = migrateSeason(world);
+  statusMessage = "새 선수 커리어 저장 완료";
   screen = "active";
   activeView = "dashboard";
   render();
@@ -516,6 +713,7 @@ app.addEventListener("click", (event) => {
       render();
     }
   } else if (modeButton) {
+    if (modeButton.dataset.careerMode === "player" && selectedMode !== "player") resetPlayerCreation();
     selectedMode = modeButton.dataset.careerMode;
     renderCreate();
   } else if (slotButton) {
@@ -525,6 +723,13 @@ app.addEventListener("click", (event) => {
   } else if (event.target.closest("#cancel-create")) {
     screen = "start";
     render();
+  } else if (event.target.closest("[data-player-back]")) {
+    playerCreationStep = Math.max(1, playerCreationStep - 1);
+    playerCreationError = "";
+    playerOfferState = null;
+    renderCreate();
+  } else if (event.target.closest("[data-offer-index]")) {
+    acceptPlayerOffer(Number(event.target.closest("[data-offer-index]").dataset.offerIndex));
   } else if (formation) {
     season.formation = formation.dataset.formation;
     season.customPositions = Object.fromEntries(formationPositions(season.formation).map((position) => [position.playerId, position]));
@@ -553,9 +758,31 @@ app.addEventListener("click", (event) => {
 });
 
 app.addEventListener("submit", (event) => {
-  if (!event.target.matches("#manager-create-form, #player-create-route")) return;
+  if (!event.target.matches("#manager-create-form, #player-create-form")) return;
   event.preventDefault();
-  createCareer(event.target);
+  if (event.target.matches("#player-create-form")) submitPlayerCreationStep(event.target);
+  else createCareer(event.target);
+});
+
+app.addEventListener("input", (event) => {
+  const form = event.target.closest("#player-create-form");
+  if (!form || playerCreationStep !== 4) return;
+  if (playerOfferState) {
+    playerOfferState = null;
+    form.querySelector(".offer-list")?.remove();
+    const submit = form.querySelector('button[type="submit"]');
+    if (submit) submit.textContent = "입단 제안 확인";
+  }
+  const base = ARCHETYPES[playerDraft.archetype].attributes;
+  const values = Object.keys(base).map((name) => Number(form.elements[`adjustment-${name}`].value));
+  const positive = values.filter((value) => value > 0).reduce((sum, value) => sum + value, 0);
+  const balance = values.reduce((sum, value) => sum + value, 0);
+  const summary = form.querySelector("#point-summary");
+  if (summary) summary.textContent = `더한 포인트 ${positive}/10 · 총 조정 ${balance}`;
+  Object.entries(base).forEach(([name, score]) => {
+    const output = form.querySelector(`[data-final-attribute="${name}"]`);
+    if (output) output.value = String(score + Number(form.elements[`adjustment-${name}`].value));
+  });
 });
 
 careerExit.addEventListener("click", () => {
@@ -621,7 +848,7 @@ window.addEventListener("resize", () => {
 careerStore = initializeCareerStore();
 const restored = activeSlotResult();
 if (restored) {
-  season = restored.slot.mode === "manager" ? migrateSeason(restored.slot.world) : createSeason();
+  season = migrateSeason(restored.slot.world);
   screen = "active";
 }
 render();

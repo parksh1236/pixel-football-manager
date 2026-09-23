@@ -131,13 +131,67 @@ input, select { font: inherit; }
 .corrupt-slot .mode-badge { color: var(--red); border-color: #713b3b; background: #271414; }
 .empty-slot { border-style: dashed; }
 .mode-picker { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; max-width: 620px; margin-bottom: 18px; }
-.create-panel { max-width: 620px; }
+.create-panel { max-width: 1000px; }
 .career-form { display: grid; gap: 16px; }
 .career-form label { display: grid; gap: 7px; color: var(--muted); font-size: .75rem; }
 .career-form input, .career-form select { width: 100%; min-height: 44px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 0; color: var(--ink); background: #08121d; }
 .career-form input:focus, .career-form select:focus { outline: 2px solid var(--amber); outline-offset: 2px; }
 .create-panel > .panel-body > .secondary-button { width: 100%; margin-top: 10px; }
 .player-placeholder { max-width: 720px; }
+.career-form fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.career-form legend { margin-bottom: 16px; color: var(--ink); font-size: 1rem; font-weight: 900; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.creation-progress { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 0 0 20px; padding: 0; list-style: none; }
+.creation-progress li { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 7px 9px; border: 1px solid var(--line); color: var(--muted); font-size: .72rem; }
+.creation-progress span { display: grid; place-items: center; width: 24px; height: 24px; flex: 0 0 24px; border: 1px solid #425768; }
+.creation-progress .current { border-color: var(--amber); color: var(--amber); }
+.creation-progress .complete { border-color: #28744b; color: var(--green); }
+.choice-fieldset { margin-top: 18px !important; padding-top: 16px !important; border-top: 1px solid var(--line) !important; }
+.choice-fieldset legend { margin-bottom: 8px; color: var(--muted); font-size: .75rem; }
+.check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.check-grid label, .entry-paths label { display: flex; align-items: center; min-height: 44px; padding: 9px; border: 1px solid var(--line); background: #08121d; cursor: pointer; }
+.check-grid input, .entry-paths input, .archetype-card input { width: auto; min-height: auto; margin: 0 8px 0 0; accent-color: var(--green); }
+.archetype-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.archetype-card { position: relative; min-height: 132px; align-content: start; padding: 14px; border: 1px solid var(--line); background: #08121d; cursor: pointer; }
+.archetype-card:has(input:checked) { border-color: var(--green); background: #10271f; }
+.archetype-card strong { color: var(--ink); font-size: .92rem; }
+.archetype-card span { line-height: 1.5; }
+.archetype-card small { color: var(--amber); }
+.attribute-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.attribute-grid label { padding: 10px; border: 1px solid var(--line); background: #08121d; }
+.attribute-grid label small { display: flex; justify-content: space-between; gap: 8px; }
+.attribute-grid output { color: var(--amber); font-weight: 900; }
+.point-summary { margin: 0 0 12px; color: var(--muted); }
+.point-summary strong { color: var(--amber); }
+.entry-paths { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.entry-paths label { display: grid; grid-template-columns: auto 1fr; }
+.entry-paths input { grid-row: 1 / 3; }
+.entry-paths strong { color: var(--ink); }
+.entry-paths span { font-size: .68rem; line-height: 1.4; }
+.creation-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.creation-actions > :only-child { grid-column: 1 / -1; }
+.creation-actions .primary-button { margin-top: 0; }
+.form-error { margin: 0; padding: 10px 12px; border: 1px solid #713b3b; color: var(--red); background: #271414; line-height: 1.5; }
+.offer-list { display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid var(--line); }
+.offer-list h3 { margin: 0; }
+.offer-card { display: grid; grid-template-columns: 1fr minmax(180px, .8fr) minmax(150px, .55fr); gap: 14px; align-items: center; padding: 12px; border: 1px solid #28744b; background: #10271f; }
+.offer-card strong, .offer-card span { display: block; }
+.offer-card span { margin-top: 4px; color: var(--green); font-size: .72rem; }
+.offer-card dl { display: flex; justify-content: space-around; gap: 12px; margin: 0; }
+.offer-card dt { color: var(--muted); font-size: .68rem; }
+.offer-card dd { margin: 3px 0 0; }
+.offer-card .primary-button { margin: 0; }
+.player-profile-grid { display: grid; grid-template-columns: minmax(260px, .7fr) minmax(0, 1.3fr); gap: 18px; }
+.player-profile h2 { margin-bottom: 4px; font-size: 1.8rem; }
+.player-profile p { color: var(--muted); }
+.player-profile dl { display: grid; gap: 8px; margin-top: 20px; }
+.player-profile dl div { display: flex; justify-content: space-between; gap: 12px; padding-bottom: 7px; border-bottom: 1px solid var(--line); }
+.player-profile dd { margin: 0; text-align: right; }
+.player-profile dt { color: var(--muted); }
+.attribute-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.attribute-summary div { display: flex; justify-content: space-between; gap: 8px; padding: 10px; border: 1px solid var(--line); background: #08121d; }
+.attribute-summary span { color: var(--muted); font-size: .72rem; }
+.attribute-summary strong { color: var(--amber); }
 
 .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .stat { padding: 15px 8px; border: 1px solid var(--line); background: #0a1420; text-align: center; }
@@ -208,6 +262,12 @@ tr.user-row { color: var(--green); background: #10251e; }
   .formation-marker span { top: 31px; }
   .fixture-row { grid-template-columns: 1fr 54px 1fr; font-size: .72rem; }
   .highlight { position: static; width: 100%; border-width: 1px 0; box-shadow: none; }
+  .form-grid, .archetype-grid, .player-profile-grid { grid-template-columns: 1fr; }
+  .creation-progress { grid-template-columns: repeat(2, 1fr); }
+  .attribute-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .entry-paths, .offer-card { grid-template-columns: 1fr; }
+  .offer-card dl { justify-content: flex-start; }
+  .attribute-summary { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {
