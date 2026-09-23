@@ -100,12 +100,13 @@ function initializeCareerStore() {
 function updateActiveSlotInMemory(nextActiveSlotId = careerStore.activeSlotId) {
   const result = activeSlotResult();
   if (!result) return careerStore;
+  const manager = result.slot.mode === "manager";
   const nextSlot = {
     ...result.slot,
-    round: season.round,
-    season: Number.isInteger(season.season) ? season.season : result.slot.season,
+    round: manager ? season.round : result.slot.round,
+    season: manager && Number.isInteger(season.season) ? season.season : result.slot.season,
     savedAt: new Date().toISOString(),
-    world: season,
+    world: manager ? season : result.slot.world,
   };
   const slots = careerStore.slots.map((slot, index) => index === result.index ? nextSlot : slot);
   return normalizeStore(nextActiveSlotId, slots);
@@ -211,7 +212,7 @@ function beginCreation(index) {
 function activateSlot(index) {
   const result = careerStore.slotResults[index];
   if (!result?.ok) return;
-  season = migrateSeason(result.slot.world);
+  season = result.slot.mode === "manager" ? migrateSeason(result.slot.world) : createSeason();
   const next = normalizeStore(result.slot.id, careerStore.slots);
   const saved = saveCareerStore(localStorage, next);
   careerStore = next;
@@ -362,14 +363,24 @@ function updateChrome() {
     return;
   }
   const slot = active.slot;
+  const round = slot.mode === "manager" ? season.round : slot.round;
   careerContext.textContent = `${slot.mode === "manager" ? "감독" : "선수"} 모드 · SLOT ${active.index + 1}`;
   clubName.textContent = slotClub(slot);
-  roundStatus.textContent = season.round >= 14 ? "SEASON COMPLETE" : `ROUND ${String(season.round + 1).padStart(2, "0")} / 14`;
+  roundStatus.textContent = round >= 14 ? "SEASON COMPLETE" : `ROUND ${String(round + 1).padStart(2, "0")} / 14`;
   document.querySelector(".manager-card strong").textContent = slot.name;
+}
+
+function syncNavigation() {
+  document.querySelectorAll("[data-view]").forEach((button) => {
+    const active = button.dataset.view === activeView;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
 }
 
 function render() {
   updateChrome();
+  syncNavigation();
   if (screen === "start") return renderStart();
   if (screen === "create") return renderCreate();
   if (activeSlotResult()?.slot.mode === "player") return renderPlayerCareer();
@@ -486,11 +497,6 @@ sidebar.addEventListener("click", (event) => {
   const button = event.target.closest("[data-view]");
   if (!button || matchRunning) return;
   activeView = button.dataset.view;
-  document.querySelectorAll("[data-view]").forEach((item) => {
-    const active = item === button;
-    item.classList.toggle("active", active);
-    item.setAttribute("aria-pressed", String(active));
-  });
   render();
   app.focus();
 });
@@ -541,7 +547,7 @@ app.addEventListener("click", (event) => {
     playMatch();
   } else if (event.target.closest("#new-season")) {
     if (confirm("현재 시즌 기록을 지우고 새 시즌을 시작할까요?")) {
-      season = createSeason();
+      season = assignCareerClub(createSeason(), activeSlotResult().slot.career.selectedClubId || "team-0");
       activeView = "dashboard";
       saveSeason();
       render();
@@ -620,7 +626,7 @@ window.addEventListener("resize", () => {
 careerStore = initializeCareerStore();
 const restored = activeSlotResult();
 if (restored) {
-  season = migrateSeason(restored.slot.world);
+  season = restored.slot.mode === "manager" ? migrateSeason(restored.slot.world) : createSeason();
   screen = "active";
 }
 render();

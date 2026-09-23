@@ -14,7 +14,7 @@ const slot = (name = "Seoul") => ({
   round: 0,
   savedAt,
   career: { round: 0 },
-  world: {},
+  world: createSeason(),
 });
 
 test("a corrupt middle slot leaves neighboring slots available", () => {
@@ -103,7 +103,7 @@ test("active slot and mode survive store reload", () => {
 });
 
 test("loading a corrupt slot keeps neighboring careers available", () => {
-  const first = createCareerSlot("manager", "첫 감독", {}, {});
+  const first = createCareerSlot("manager", "첫 감독", createSeason(), {});
   const third = createCareerSlot("player", "세 번째 선수", {}, {});
   const raw = JSON.stringify({ activeSlotId: first.id, slots: [first, "{broken", third] });
 
@@ -114,7 +114,21 @@ test("loading a corrupt slot keeps neighboring careers available", () => {
   assert.equal(store.slots[2].name, "세 번째 선수");
 });
 
-test("selected club becomes the engine user club without mutating the world", () => {
+test("malformed active manager world is isolated and its selection is cleared", () => {
+  const first = createCareerSlot("player", "정상 선수", {}, {});
+  const broken = createCareerSlot("manager", "손상 감독", {}, {});
+  const third = createCareerSlot("manager", "정상 감독", createSeason(), {});
+  const raw = JSON.stringify({ activeSlotId: broken.id, slots: [first, broken, third] });
+
+  const store = loadCareerStore({ getItem: () => raw });
+
+  assert.deepEqual(store.slotResults.map(({ ok }) => ok), [true, false, true]);
+  assert.equal(store.activeSlotId, null);
+  assert.equal(store.slots[0].name, "정상 선수");
+  assert.equal(store.slots[2].name, "정상 감독");
+});
+
+test("selected club is reapplied to a fresh season without mutating it", () => {
   const world = createSeason();
   const selectedName = world.teams.find(({ id }) => id === "team-3").name;
   const original = structuredClone(world);

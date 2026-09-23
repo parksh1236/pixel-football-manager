@@ -13,6 +13,29 @@ const isIsoTimestamp = (value) => typeof value === "string"
 const newId = () => globalThis.crypto?.randomUUID?.()
   || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
+function validManagerWorld(world) {
+  if (!isRecord(world)
+    || (world.version !== 1 && world.version !== 2)
+    || !isNonNegativeInteger(world.round) || world.round > 14
+    || !Array.isArray(world.teams) || world.teams.length !== 8
+    || !Array.isArray(world.players) || world.players.length !== 18
+    || !Array.isArray(world.fixtures) || world.fixtures.length !== 14
+    || !Array.isArray(world.completedRoundIds)) return false;
+  const teamIds = new Set(world.teams.map((team) => team?.id));
+  return teamIds.size === 8 && teamIds.has("team-0")
+    && world.teams.every((team) => isRecord(team)
+      && typeof team.id === "string" && typeof team.name === "string"
+      && typeof team.short === "string" && typeof team.color === "string" && Number.isFinite(team.rating))
+    && world.players.every((player) => isRecord(player)
+      && typeof player.id === "string" && typeof player.name === "string"
+      && typeof player.position === "string" && Number.isFinite(player.rating)
+      && Number.isFinite(player.condition) && typeof player.starter === "boolean")
+    && world.fixtures.every((round) => Array.isArray(round) && round.length === 4
+      && round.every((fixture) => isRecord(fixture) && teamIds.has(fixture.home) && teamIds.has(fixture.away))
+      && round.some((fixture) => fixture.home === "team-0" || fixture.away === "team-0"))
+    && world.completedRoundIds.every(isNonNegativeInteger);
+}
+
 function validSlot(value) {
   return isRecord(value)
     && typeof value.id === "string" && value.id.length > 0
@@ -24,7 +47,8 @@ function validSlot(value) {
     && isNonNegativeInteger(value.round)
     && isIsoTimestamp(value.savedAt)
     && isRecord(value.career)
-    && isRecord(value.world);
+    && isRecord(value.world)
+    && (value.mode !== "manager" || validManagerWorld(value.world));
 }
 
 export function createCareerSlot(mode, name, world, career) {
