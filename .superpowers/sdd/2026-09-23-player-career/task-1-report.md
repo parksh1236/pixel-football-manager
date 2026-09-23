@@ -9,15 +9,24 @@
 ## Checks
 
 - TDD RED: `node --test player-career.test.js` failed with `ERR_MODULE_NOT_FOUND` before `player-career.js` existed.
-- TDD GREEN: `node --test player-career.test.js career.test.js game.test.js` — 37 passed, 0 failed.
+- TDD GREEN: `node --test player-career.test.js career.test.js game.test.js` — 42 passed, 0 failed.
 - `node --check app.js` — passed.
 - `node --check player-career.js` — passed.
 - `git diff --check` — passed.
 - Browser QA: completed all three entry paths with keyboard-triggered controls at desktop and 390×844; offer counts were 1/3/3, trial save survived reload, no horizontal overflow was detected, and console errors/warnings were empty.
+- Review-fix smoke: whitespace-only identity stayed on step 1 with an inline error; a corrupt persisted player slot was isolated while a neighboring legacy no-player slot opened its fallback; console errors/warnings remained empty.
+
+## Review Fixes
+
+- Rejected inherited archetype and attribute keys with own-property checks.
+- Quarantined malformed persisted player profiles without hiding valid neighboring or legacy no-player slots.
+- Validated trimmed identity fields before advancing from creation step 1.
+- Applied a safe default rating when building offers for unrated teams, keeping wages finite and positive.
+- Added positional needs to generated season clubs and used them in deterministic trial ranking.
 
 ## Commit
 
-`feat: add player career creation`
+`fix: harden player career creation`
 
 ## Gaps
 

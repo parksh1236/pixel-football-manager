@@ -6,6 +6,7 @@ import {
   ARCHETYPES,
   createCareerPlayer,
   createEntryOffers,
+  validatePlayerCareerStore,
   validatePlayerDraft,
 } from "./player-career.js";
 
@@ -68,6 +69,15 @@ test("creation rejects fractional, unbalanced, and non-ten-point adjustments", (
   }
 });
 
+test("creation rejects inherited archetype and attribute keys without throwing", () => {
+  assert.doesNotThrow(() => validatePlayerDraft({ ...draft, archetype: "constructor" }));
+  assert.equal(validatePlayerDraft({ ...draft, archetype: "constructor" }).ok, false);
+  assert.equal(validatePlayerDraft({
+    ...draft,
+    adjustments: { ...draft.adjustments, constructor: 0 },
+  }).ok, false);
+});
+
 test("created player keeps the archetype total and attribute bounds", () => {
   const player = createCareerPlayer(draft);
   const baseTotal = Object.values(ARCHETYPES.playmaker.attributes).reduce((sum, value) => sum + value, 0);
@@ -119,6 +129,47 @@ test("all three entry paths return deterministic eligible offers", () => {
   )));
 });
 
+test("an unrated club still receives a finite positive offer", () => {
+  const player = createCareerPlayer(draft);
+  const [offer] = createEntryOffers(player, "club-choice", [{ id: "unrated", name: "Unrated FC" }]);
+
+  assert.equal(Number.isFinite(offer.wage), true);
+  assert.ok(offer.wage > 0);
+});
+
+test("trial ranking changes when a club needs the player's position", () => {
+  const teams = [
+    { id: "club-am", rating: 70, needs: ["AM"] },
+    { id: "club-cm", rating: 70, needs: ["CM"] },
+    { id: "club-gk", rating: 70, needs: ["GK"] },
+  ];
+  const attackingMidfielder = createCareerPlayer(draft);
+  const goalkeeper = createCareerPlayer({
+    ...draft,
+    preferredPosition: "GK",
+    secondaryPositions: [],
+    archetype: "goalkeeper",
+  });
+
+  assert.equal(createEntryOffers(attackingMidfielder, "trial", teams)[0].clubId, "club-am");
+  assert.equal(createEntryOffers(goalkeeper, "trial", teams)[0].clubId, "club-gk");
+});
+
+test("generated clubs expose positional needs to trial offers", () => {
+  const world = createSeason();
+  const attackingMidfielder = createCareerPlayer(draft);
+  const goalkeeper = {
+    ...attackingMidfielder,
+    preferredPosition: "GK",
+    secondaryPositions: [],
+    positionMastery: { GK: 100 },
+  };
+
+  assert.ok(world.teams.every(({ needs }) => Array.isArray(needs) && needs.length));
+  assert.deepEqual(createEntryOffers(attackingMidfielder, "trial", world.teams).map(({ clubId }) => clubId), ["team-0", "team-3", "team-5"]);
+  assert.deepEqual(createEntryOffers(goalkeeper, "trial", world.teams).map(({ clubId }) => clubId), ["team-2", "team-6", "team-0"]);
+});
+
 test("created player can be stored as a valid player career slot", () => {
   const world = createSeason();
   const player = createCareerPlayer(draft);
@@ -140,4 +191,30 @@ test("created player can be stored as a valid player career slot", () => {
   assert.equal(result.slot.mode, "player");
   assert.equal(result.slot.career.player.name, "김하늘");
   assert.equal(result.slot.career.player.contract.clubId, "team-0");
+});
+
+test("restored player slots isolate malformed profiles but allow legacy placeholders", () => {
+  const world = createSeason();
+  const player = createCareerPlayer(draft);
+  const contractedPlayer = {
+    ...player,
+    clubId: "team-0",
+    wage: 150_000,
+    contract: { clubId: "team-0", role: "유망주", wage: 150_000, years: 2 },
+  };
+  const legacySlot = createCareerSlot("player", "기존 선수", world, { playerName: "기존 선수" });
+  const malformedSlot = {
+    ...createCareerSlot("player", "손상 선수", world, { player: contractedPlayer }),
+    career: { player: { ...contractedPlayer, archetype: "constructor", contract: null } },
+  };
+  const validSlot = createCareerSlot("player", player.name, world, { player: contractedPlayer });
+  const slots = [legacySlot, malformedSlot, validSlot];
+  const slotResults = parseSlots(slots);
+  const restored = validatePlayerCareerStore({ activeSlotId: malformedSlot.id, slots, slotResults });
+  const legacyRestored = validatePlayerCareerStore({ activeSlotId: legacySlot.id, slots, slotResults });
+
+  assert.deepEqual(restored.slotResults.map(({ ok }) => ok), [true, false, true]);
+  assert.equal(restored.activeSlotId, null);
+  assert.equal(restored.slots[1], malformedSlot);
+  assert.equal(legacyRestored.activeSlotId, legacySlot.id);
 });

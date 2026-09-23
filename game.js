@@ -225,11 +225,16 @@ export function createSchedule(teamIds) {
 }
 
 export function createSeason() {
+  const squadNeeds = [
+    ["AM", "CM", "RW"], ["ST", "LW", "RW"], ["GK", "CB", "LB"], ["DM", "CM", "AM"],
+    ["RB", "CB", "LB"], ["ST", "AM", "LW"], ["GK", "RB", "RW"], ["DM", "CB", "ST"],
+  ];
   const teams = TEAM_NAMES.map((name, index) => ({
     id: `team-${index}`,
     name,
     short: name.split(" ").at(-1).slice(0, 3),
     rating: 66 + ((index * 7) % 13),
+    needs: squadNeeds[index],
     color: ["#44d17a", "#38bdf8", "#fb7185", "#fbbf24", "#a78bfa", "#fb923c", "#e2e8f0", "#2dd4bf"][index],
   }));
   const players = PLAYER_NAMES.map((name, index) => ({

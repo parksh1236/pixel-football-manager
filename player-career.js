@@ -58,7 +58,7 @@ export function validatePlayerDraft(draft) {
     errors.push("보조 포지션은 주 포지션과 다른 두 개 이하로 선택하세요.");
   }
 
-  const selectedArchetype = ARCHETYPES[draft.archetype];
+  const selectedArchetype = Object.hasOwn(ARCHETYPES, draft.archetype) ? ARCHETYPES[draft.archetype] : null;
   if (!selectedArchetype) errors.push("선수 유형을 선택하세요.");
   const adjustments = isRecord(draft.adjustments) ? draft.adjustments : null;
   if (!adjustments) {
@@ -66,7 +66,7 @@ export function validatePlayerDraft(draft) {
   } else if (selectedArchetype) {
     const entries = Object.entries(adjustments);
     const values = entries.map(([, value]) => value);
-    if (entries.some(([name, value]) => !(name in selectedArchetype.attributes) || !Number.isInteger(value))) {
+    if (entries.some(([name, value]) => !Object.hasOwn(selectedArchetype.attributes, name) || !Number.isInteger(value))) {
       errors.push("능력치 조정은 알려진 항목의 정수만 사용할 수 있습니다.");
     } else {
       const positive = total(values.filter((value) => value > 0));
@@ -140,16 +140,82 @@ export function createCareerPlayer(draft) {
   };
 }
 
-function offerFor(player, team) {
-  const ability = player.overall * 5;
-  const gap = ability - team.rating;
+function isValidPlayerCareerSlot(slot) {
+  if (!isRecord(slot) || slot.mode !== "player" || !isRecord(slot.career)) return false;
+  if (!Object.hasOwn(slot.career, "player")) return true;
+  const player = slot.career.player;
+  if (!isRecord(player)
+    || typeof player.name !== "string" || !player.name.trim()
+    || typeof player.nationality !== "string" || !player.nationality.trim()
+    || !Number.isInteger(player.age) || !Number.isInteger(player.height)
+    || !["left", "right"].includes(player.foot)
+    || typeof player.appearance !== "string" || !player.appearance
+    || !POSITIONS.includes(player.preferredPosition)
+    || !Array.isArray(player.secondaryPositions)
+    || player.secondaryPositions.length > 2
+    || player.secondaryPositions.some((position) => !POSITIONS.includes(position))
+    || !isRecord(player.positionMastery)
+    || !Object.hasOwn(ARCHETYPES, player.archetype)
+    || !isRecord(player.attributes)
+    || !Number.isInteger(player.overall)
+    || !Number.isFinite(player.condition)
+    || !Number.isInteger(player.potential)
+    || !Number.isFinite(player.value)
+    || !Number.isFinite(player.wage) || player.wage <= 0
+    || !isRecord(player.contract)
+    || typeof player.contract.clubId !== "string"
+    || typeof player.contract.role !== "string" || !player.contract.role
+    || !Number.isFinite(player.contract.wage) || player.contract.wage <= 0
+    || !Number.isInteger(player.contract.years) || player.contract.years <= 0
+    || !Number.isFinite(player.trust)
+    || !isRecord(player.training)
+    || !isRecord(player.seasonStats)
+    || !isRecord(player.careerStats)) return false;
+
+  const positions = [player.preferredPosition, ...player.secondaryPositions];
+  if (new Set(positions).size !== positions.length
+    || positions.some((position) => !Number.isFinite(player.positionMastery[position]))) return false;
+  const attributeNames = Object.keys(ARCHETYPES[player.archetype].attributes);
+  return Object.keys(player.attributes).length === attributeNames.length
+    && attributeNames.every((name) => Object.hasOwn(player.attributes, name)
+      && Number.isInteger(player.attributes[name])
+      && player.attributes[name] >= 1
+      && player.attributes[name] <= 20);
+}
+
+export function validatePlayerCareerStore(store) {
+  const slotResults = store.slotResults.map((result) => (
+    result.ok && result.slot.mode === "player" && !isValidPlayerCareerSlot(result.slot)
+      ? { ok: false, index: result.index, error: "선수 저장 정보가 올바르지 않습니다." }
+      : result
+  ));
+  const activeSlotId = slotResults.some((result) => result.ok && result.slot.id === store.activeSlotId)
+    ? store.activeSlotId
+    : null;
+  return { ...store, activeSlotId, slotResults };
+}
+
+const teamRating = (team) => Number.isFinite(team.rating) ? team.rating : 70;
+
+function positionSuitability(player, team) {
+  const needs = Array.isArray(team.needs) ? team.needs : [];
+  if (!needs.length) return 100;
+  return Math.max(0, ...needs.map((position) => (
+    Object.hasOwn(player.positionMastery, position) ? player.positionMastery[position] : 0
+  )));
+}
+
+function offerFor(player, team, considerNeeds) {
+  const rating = teamRating(team);
+  const ability = player.overall * 5 - (considerNeeds ? (100 - positionSuitability(player, team)) / 5 : 0);
+  const gap = ability - rating;
   const role = gap >= 5 ? "핵심" : gap >= 0 ? "주전" : gap >= -6 ? "로테이션" : "유망주";
   const roleBonus = { "핵심": 1.5, "주전": 1.25, "로테이션": 1, "유망주": 0.8 }[role];
   return {
     clubId: team.id,
     clubName: team.name || team.id,
     role,
-    wage: Math.round((player.wage + team.rating * 1_000) * roleBonus / 1_000) * 1_000,
+    wage: Math.round((player.wage + rating * 1_000) * roleBonus / 1_000) * 1_000,
     years: gap >= 0 ? 3 : 2,
   };
 }
@@ -159,15 +225,16 @@ export function createEntryOffers(player, path, teams) {
     ? teams.filter((team) => isRecord(team) && typeof team.id === "string" && Number.isFinite(team.rating ?? 70))
     : [];
   const ranked = [...eligibleTeams].sort((left, right) => (
-    Math.abs((left.rating ?? 70) - player.overall * 5) - Math.abs((right.rating ?? 70) - player.overall * 5)
+    Math.abs(teamRating(left) - player.overall * 5) + (path === "trial" ? (100 - positionSuitability(player, left)) / 4 : 0)
+      - Math.abs(teamRating(right) - player.overall * 5) - (path === "trial" ? (100 - positionSuitability(player, right)) / 4 : 0)
       || left.id.localeCompare(right.id)
   ));
 
-  if (path === "club-choice") return ranked.slice(0, 1).map((team) => offerFor(player, team));
-  if (path === "trial") return ranked.slice(0, 3).map((team) => offerFor(player, team));
+  if (path === "club-choice") return ranked.slice(0, 1).map((team) => offerFor(player, team, false));
+  if (path === "trial") return ranked.slice(0, 3).map((team) => offerFor(player, team, true));
   if (path === "free-agent") {
-    const suitable = ranked.filter((team) => (team.rating ?? 70) <= player.overall * 5 + 18);
-    return (suitable.length ? suitable : ranked.slice(0, 3)).map((team) => offerFor(player, team));
+    const suitable = ranked.filter((team) => teamRating(team) <= player.overall * 5 + 18);
+    return (suitable.length ? suitable : ranked.slice(0, 3)).map((team) => offerFor(player, team, false));
   }
   return [];
 }

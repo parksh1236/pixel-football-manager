@@ -1,6 +1,6 @@
 import { calculateTable, commentate, completeRound, createSeason, FORMATIONS, formationPositions, formationSuitability, interpolateMatchState, lineupPositions, matchVisualState, migrateSeason, movePlayer, pitchPoint, scoreForEvents, swapStarter } from "./game.js";
 import { assignCareerClub, createCareerSlot, LEGACY_STORAGE_KEY, loadCareerStore, MAX_SLOTS, migrateLegacySave, parseSlots, saveCareerStore, updateActiveSlot } from "./career.js";
-import { ARCHETYPES, createCareerPlayer, createEntryOffers, validatePlayerDraft } from "./player-career.js";
+import { ARCHETYPES, createCareerPlayer, createEntryOffers, validatePlayerCareerStore, validatePlayerDraft } from "./player-career.js";
 
 const app = document.querySelector("#app");
 const saveStatus = document.querySelector("#save-status");
@@ -79,7 +79,7 @@ function resetPlayerCreation() {
 
 function normalizeStore(activeSlotId, slots) {
   const slotResults = parseSlots(slots);
-  return { activeSlotId, slots, slotResults };
+  return validatePlayerCareerStore({ activeSlotId, slots, slotResults });
 }
 
 function activeSlotResult() {
@@ -94,7 +94,7 @@ function firstOpenSlot(store = careerStore) {
 }
 
 function initializeCareerStore() {
-  const loaded = loadCareerStore(localStorage);
+  const loaded = validatePlayerCareerStore(loadCareerStore(localStorage));
   statusMessage = loaded.error || "저장 준비";
   const imported = loaded.slotResults.some((result) => result.ok && result.slot.career.legacyImportId === LEGACY_STORAGE_KEY);
   if (imported) return loaded;
@@ -363,6 +363,11 @@ function submitPlayerCreationStep(form) {
       foot: String(data.get("foot")),
       appearance: String(data.get("appearance")),
     };
+    const validation = validatePlayerDraft(playerDraft);
+    if (!validation.ok) {
+      playerCreationFailure(validation.errors.join(" "));
+      return;
+    }
   } else if (playerCreationStep === 2) {
     const preferredPosition = String(data.get("preferredPosition"));
     const secondaryPositions = data.getAll("secondaryPositions").map(String);
