@@ -1,5 +1,5 @@
 import { calculateTable, commentate, completeRound, createSeason, FORMATIONS, formationPositions, formationSuitability, interpolateMatchState, lineupPositions, matchVisualState, migrateSeason, movePlayer, pitchPoint, scoreForEvents, swapStarter } from "./game.js";
-import { assignCareerClub, createCareerSlot, LEGACY_STORAGE_KEY, loadCareerStore, MAX_SLOTS, migrateLegacySave, parseSlots, saveCareerStore } from "./career.js";
+import { assignCareerClub, createCareerSlot, LEGACY_STORAGE_KEY, loadCareerStore, MAX_SLOTS, migrateLegacySave, parseSlots, saveCareerStore, updateActiveSlot } from "./career.js";
 
 const app = document.querySelector("#app");
 const saveStatus = document.querySelector("#save-status");
@@ -98,18 +98,13 @@ function initializeCareerStore() {
 }
 
 function updateActiveSlotInMemory(nextActiveSlotId = careerStore.activeSlotId) {
-  const result = activeSlotResult();
-  if (!result) return careerStore;
-  const manager = result.slot.mode === "manager";
-  const nextSlot = {
-    ...result.slot,
-    round: manager ? season.round : result.slot.round,
-    season: manager && Number.isInteger(season.season) ? season.season : result.slot.season,
-    savedAt: new Date().toISOString(),
-    world: manager ? season : result.slot.world,
-  };
-  const slots = careerStore.slots.map((slot, index) => index === result.index ? nextSlot : slot);
-  return normalizeStore(nextActiveSlotId, slots);
+  const next = updateActiveSlot(careerStore, season, {
+    tactic: season.tactic,
+    formation: season.formation,
+    lineup: season.players.filter(({ starter }) => starter).map(({ id }) => id),
+    customPositions: season.customPositions,
+  });
+  return normalizeStore(nextActiveSlotId, next.slots);
 }
 
 function saveSeason() {

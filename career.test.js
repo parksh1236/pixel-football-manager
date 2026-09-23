@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createSeason } from "./game.js";
-import { assignCareerClub, createCareerSlot, loadCareerStore, migrateLegacySave, parseSlots, saveCareerStore, upsertSlot } from "./career.js";
+import { assignCareerClub, createCareerSlot, loadCareerStore, migrateLegacySave, parseSlots, saveCareerStore, updateActiveSlot, upsertSlot } from "./career.js";
 
 const savedAt = "2026-09-23T00:00:00.000Z";
 const slot = (name = "Seoul") => ({
@@ -148,4 +148,26 @@ test("selected club is reapplied to a fresh season without mutating it", () => {
 
   assert.equal(next.teams.find(({ id }) => id === "team-0").name, selectedName);
   assert.deepEqual(world, original);
+});
+
+test("manager round autosave updates only the active slot", () => {
+  const first = createCareerSlot("manager", "A", createSeason(), { tactic: "balanced", selectedClubId: "team-3" });
+  const second = createCareerSlot("manager", "B", createSeason(), { tactic: "defensive" });
+  const world = createSeason();
+  world.round = 1;
+
+  const next = updateActiveSlot(
+    { activeSlotId: first.id, slots: [null, first, second] },
+    world,
+    { tactic: "attacking", formation: "4-4-2", lineup: ["player-0"] },
+  );
+
+  assert.equal(next.slots[1].world.round, 1);
+  assert.equal(next.slots[1].round, 1);
+  assert.equal(next.slots[1].career.tactic, "attacking");
+  assert.equal(next.slots[1].career.formation, "4-4-2");
+  assert.deepEqual(next.slots[1].career.lineup, ["player-0"]);
+  assert.equal(next.slots[1].career.selectedClubId, "team-3");
+  assert.strictEqual(next.slots[2], second);
+  assert.equal(next.slots[2].world.round, 0);
 });

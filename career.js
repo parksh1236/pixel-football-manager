@@ -184,3 +184,18 @@ export function saveCareerStore(storage, store) {
     return { ok: false, error: "커리어를 저장하지 못했습니다." };
   }
 }
+
+export function updateActiveSlot(store, world, careerPatch = {}) {
+  const index = store.slots.findIndex((slot) => slot?.id === store.activeSlotId);
+  if (index < 0 || store.slots[index].mode !== "manager") return store;
+  const current = store.slots[index];
+  const slot = {
+    ...current,
+    season: isNonNegativeInteger(world.season) ? world.season : current.season,
+    round: isNonNegativeInteger(world.round) ? world.round : current.round,
+    savedAt: new Date().toISOString(),
+    career: { ...current.career, ...careerPatch },
+    world,
+  };
+  return { ...store, slots: store.slots.map((value, slotIndex) => slotIndex === index ? slot : value) };
+}
