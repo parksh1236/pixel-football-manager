@@ -269,7 +269,36 @@ test("repeated focus loses efficiency and low condition raises injury risk", () 
   const result = applyTrainingWeek(player, schedule, () => 0);
 
   assert.ok(result.efficiency < 1);
-  assert.ok(result.player.injuryDays > 0);
+  assert.ok(result.injuryRisk > 0);
+});
+
+test("a Monday injury counts down through every remaining day", () => {
+  const player = { ...createCareerPlayer(draft), condition: 30 };
+  const result = applyTrainingWeek(player, buildAutoSchedule(player, 5, "technique", "hard"), () => 0);
+
+  assert.ok(result.injuryRisk > 0);
+  assert.equal(result.player.injuryDays, 0);
+});
+
+test("calendar days modify pre-match fatigue and post-match recovery", () => {
+  const player = { ...createCareerPlayer(draft), condition: 50 };
+  const base = Array.from({ length: 7 }, (_, day) => ({
+    day,
+    type: day === 5 ? "match" : day === 6 ? "recovery" : "rest",
+    intensity: "low",
+  }));
+  const mondayHard = base.with(0, { day: 0, type: "technique", intensity: "hard" });
+  const fridayHard = base.with(4, { day: 4, type: "technique", intensity: "hard" });
+  const ordinaryRecovery = base.with(0, { day: 0, type: "recovery", intensity: "low" });
+
+  assert.equal(
+    applyTrainingWeek(player, mondayHard, () => 1).player.condition
+      - applyTrainingWeek(player, fridayHard, () => 1).player.condition,
+    4,
+  );
+  const tiredPlayer = { ...player, condition: 0 };
+  assert.equal(applyTrainingWeek(tiredPlayer, base, () => 1).player.condition, 51);
+  assert.equal(applyTrainingWeek(tiredPlayer, ordinaryRecovery, () => 1).player.condition, 57);
 });
 
 test("rest and recovery raise condition", () => {

@@ -315,53 +315,52 @@ export function applyTrainingWeek(player, schedule, random = Math.random) {
   const efficiencies = [];
   let condition = initialCondition;
   let experience = player.training?.experience || 0;
-  let injuryDays = Math.max(0, initialInjuryDays - 7);
+  let injuryDays = initialInjuryDays;
   let injuryRisk = 0;
+  const preMatchDay = (matchDay + 6) % 7;
+  const recoveryDay = (matchDay + 1) % 7;
 
   for (const session of schedule) {
+    const injuredAtStart = injuryDays > 0;
     if (session.type === "rest") {
       condition = clamp(condition + 8, 0, 100);
-      continue;
-    }
-    if (session.type === "recovery") {
-      condition = clamp(condition + 14, 0, 100);
-      continue;
-    }
-    if (session.type === "match") {
+    } else if (session.type === "recovery") {
+      condition = clamp(condition + 14 + (session.day === recoveryDay ? 4 : 0), 0, 100);
+    } else if (session.type === "match") {
       condition = clamp(condition - 7, 0, 100);
-      continue;
-    }
-    if (injuryDays > 0 && session.intensity === "hard") continue;
+    } else if (!injuredAtStart || session.intensity !== "hard") {
+      const efficiency = focusEfficiency(recentFocus, session.type);
+      const intensityFactor = INTENSITY_FACTOR[session.intensity];
+      const gained = 6 * intensityFactor * efficiency * ageFactor * potentialFactor;
+      efficiencies.push(efficiency);
+      experience += gained;
+      condition = clamp(condition - ({ low: 2, normal: 5, hard: 9 }[session.intensity]
+        + (session.type === "physical" ? 2 : 0)
+        + (session.intensity === "hard" && session.day === preMatchDay ? 4 : 0)), 0, 100);
 
-    const efficiency = focusEfficiency(recentFocus, session.type);
-    const intensityFactor = INTENSITY_FACTOR[session.intensity];
-    const gained = 6 * intensityFactor * efficiency * ageFactor * potentialFactor;
-    efficiencies.push(efficiency);
-    experience += gained;
-    condition = clamp(condition - ({ low: 2, normal: 5, hard: 9 }[session.intensity]
-      + (session.type === "physical" ? 2 : 0)), 0, 100);
-
-    if (session.type === "position") {
-      for (const position of player.secondaryPositions) {
-        positionMastery[position] = clamp(positionMastery[position] + 1.5 * intensityFactor * efficiency, 0, 100);
-      }
-    } else {
-      for (const attribute of TRAINING_ATTRIBUTES[session.type]) {
-        progress[attribute] = (progress[attribute] || 0) + gained / TRAINING_ATTRIBUTES[session.type].length;
-        while (progress[attribute] >= 8 && attributes[attribute] < 20) {
-          attributes[attribute] += 1;
-          progress[attribute] -= 8;
+      if (session.type === "position") {
+        for (const position of player.secondaryPositions) {
+          positionMastery[position] = clamp(positionMastery[position] + 1.5 * intensityFactor * efficiency, 0, 100);
+        }
+      } else {
+        for (const attribute of TRAINING_ATTRIBUTES[session.type]) {
+          progress[attribute] = (progress[attribute] || 0) + gained / TRAINING_ATTRIBUTES[session.type].length;
+          while (progress[attribute] >= 8 && attributes[attribute] < 20) {
+            attributes[attribute] += 1;
+            progress[attribute] -= 8;
+          }
         }
       }
-    }
 
-    recentFocus.push(session.type);
-    recentFocus.splice(0, Math.max(0, recentFocus.length - 3));
-    if (session.intensity === "hard" && condition < 50) {
-      const risk = clamp((50 - condition) / 100 + 0.08, 0, 0.5);
-      injuryRisk = Math.max(injuryRisk, risk);
-      if (random() < risk) injuryDays = Math.max(injuryDays, 3 + Math.ceil((50 - condition) / 10));
+      recentFocus.push(session.type);
+      recentFocus.splice(0, Math.max(0, recentFocus.length - 3));
+      if (session.intensity === "hard" && condition < 50) {
+        const risk = clamp((50 - condition) / 100 + 0.08, 0, 0.5);
+        injuryRisk = Math.max(injuryRisk, risk);
+        if (random() < risk) injuryDays = Math.max(injuryDays, 3 + Math.ceil((50 - condition) / 10));
+      }
     }
+    if (injuredAtStart) injuryDays = Math.max(0, injuryDays - 1);
   }
 
   const overall = Math.round(total(Object.values(attributes)) / Object.keys(attributes).length);
