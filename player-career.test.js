@@ -441,7 +441,7 @@ test("completion applies match records, experience, and trust exactly once", () 
   const world = createSeason();
   const fixture = world.fixtures[0].find(({ home, away }) => home === "team-0" || away === "team-0");
   const player = contractedPlayer({ trust: 50, condition: 100 });
-  const match = createPlayerMatch(player, fixture, world, () => 0.99);
+  const match = createPlayerMatch(player, fixture, world, () => 0.5);
   const first = summarizePlayerMatch(match);
   const second = summarizePlayerMatch(first.match);
 
@@ -453,17 +453,17 @@ test("completion applies match records, experience, and trust exactly once", () 
   assert.equal(second.match.recordsApplied, true);
 });
 
-test("personal goals and assists cannot exceed the club's actual score", () => {
+test("summary counts only contributions attached to actual goal events", () => {
   const player = contractedPlayer();
   const match = {
     player,
     selection: "starter",
     fixture: { home: "team-0", away: "team-1" },
-    result: { home: 1, away: 0 },
+    result: { home: 2, away: 0 },
     personalEvents: [
+      { type: "goal", contribution: "goal" },
+      { type: "goal", contribution: "assist" },
       { type: "shot", outcome: "goal" },
-      { type: "shot", outcome: "goal" },
-      { type: "key-pass", outcome: "assist" },
       { type: "key-pass", outcome: "assist" },
     ],
     recordsApplied: false,
@@ -473,4 +473,65 @@ test("personal goals and assists cannot exceed the club's actual score", () => {
 
   assert.equal(summary.goals, 1);
   assert.equal(summary.assists, 1);
+});
+
+test("personal scoring is attributed only on actual shared team goals", () => {
+  const world = createSeason();
+  const fixture = world.fixtures[0].find(({ home, away }) => home === "team-0" || away === "team-0");
+  const player = contractedPlayer({
+    preferredPosition: "ST",
+    secondaryPositions: [],
+    positionMastery: { ST: 100 },
+    trust: 100,
+    condition: 100,
+  });
+  player.attributes.finishing = 20;
+  const match = createPlayerMatch(player, fixture, world, () => 0.8);
+  const sharedGoalIds = new Set(match.events.filter(({ type, teamId }) => type === "goal" && teamId === player.clubId).map(({ id }) => id));
+  const attributed = match.personalEvents.filter(({ contribution }) => contribution === "goal" || contribution === "assist");
+
+  assert.ok(attributed.length > 0);
+  assert.ok(attributed.every(({ id, type, teamId }) => sharedGoalIds.has(id) && type === "goal" && teamId === player.clubId));
+  assert.equal(match.personalEvents.some(({ type, outcome }) => type === "shot" && outcome === "goal"), false);
+});
+
+test("detailed finishing changes shot outcomes for equal-overall players", () => {
+  const base = contractedPlayer({
+    preferredPosition: "ST",
+    secondaryPositions: [],
+    positionMastery: { ST: 100 },
+    trust: 100,
+    condition: 100,
+  });
+  const highFinishing = { ...base, attributes: { ...base.attributes, finishing: 16, strength: 5 } };
+  const lowFinishing = { ...base, attributes: { ...base.attributes, finishing: 6, strength: 15 } };
+  const create = (player) => {
+    const world = createSeason();
+    const fixture = world.fixtures[0].find(({ home, away }) => home === "team-0" || away === "team-0");
+    return createPlayerMatch(player, fixture, world, () => 0.7).personalEvents
+      .filter(({ type, contribution }) => type === "shot" && !contribution)
+      .map(({ outcome }) => outcome);
+  };
+
+  assert.equal(highFinishing.overall, lowFinishing.overall);
+  assert.deepEqual(create(highFinishing), ["on-target", "on-target"]);
+  assert.deepEqual(create(lowFinishing), ["off-target", "off-target"]);
+});
+
+test("a bench player cannot receive a goal from before entering the match", () => {
+  const world = createSeason();
+  const fixture = world.fixtures[0].find(({ home, away }) => home === "team-0" || away === "team-0");
+  const player = contractedPlayer({
+    preferredPosition: "ST",
+    secondaryPositions: [],
+    positionMastery: { ST: 100 },
+    overall: 10,
+    condition: 32,
+    trust: 0,
+    attributes: { ...contractedPlayer().attributes, finishing: 20, dribbling: 20, flair: 20, pace: 20 },
+  });
+  const match = createPlayerMatch(player, fixture, world, () => 0.5);
+
+  assert.equal(match.selection, "bench");
+  assert.ok(match.personalEvents.filter(({ contribution }) => contribution).every(({ minute }) => minute >= 65));
 });

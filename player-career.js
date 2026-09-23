@@ -413,6 +413,35 @@ function positionEventTypes(position) {
   return ["dribble", "shot", "shot"];
 }
 
+const ACTION_ATTRIBUTES = {
+  distribution: ["passing", "vision"],
+  save: ["reflexes"],
+  tackle: ["tackling", "strength"],
+  interception: ["marking", "vision"],
+  pass: ["passing"],
+  "key-pass": ["passing", "vision", "flair"],
+  dribble: ["dribbling", "flair", "pace"],
+  shot: ["finishing"],
+};
+
+function playerActionOutcome(player, type, random) {
+  const attributes = ACTION_ATTRIBUTES[type];
+  const ability = total(attributes.map((name) => player.attributes[name])) / attributes.length / 20;
+  const condition = clamp(player.condition, 0, 100) / 100;
+  const mastery = clamp(player.positionMastery[player.preferredPosition] || 0, 0, 100) / 100;
+  const success = random() < ability * 0.6 + condition * 0.2 + mastery * 0.2;
+  return {
+    distribution: success ? "completed" : "failed",
+    save: success ? "saved" : "failed",
+    tackle: success ? "won" : "lost",
+    interception: success ? "won" : "missed",
+    pass: success ? "completed" : "failed",
+    "key-pass": success ? "completed" : "failed",
+    dribble: success ? "completed" : "lost",
+    shot: success ? "on-target" : "off-target",
+  }[type];
+}
+
 function playerEventCommentary(event, player, previous) {
   const flow = previous.at(-1)?.type === "pass" || previous.at(-1)?.type === "key-pass"
     ? "앞선 패스 흐름을 이어 "
@@ -420,29 +449,24 @@ function playerEventCommentary(event, player, previous) {
       ? "공을 되찾은 뒤 "
       : "";
   const action = {
-    distribution: "정확한 킥으로 공격을 시작합니다.",
-    save: "반사적으로 몸을 날려 선방합니다!",
-    tackle: "타이밍 좋은 태클로 공격을 끊습니다.",
-    interception: "패스 길을 읽고 가로챕니다.",
-    pass: "동료에게 정확히 패스를 연결합니다.",
-    "key-pass": event.outcome === "assist" ? "수비 사이로 도움을 기록하는 킬패스를 보냅니다!" : "수비 사이로 날카로운 킬패스를 보냅니다.",
-    dribble: "개인기로 압박을 벗어나 전진합니다.",
-    shot: event.outcome === "goal" ? "침착하게 마무리해 득점합니다!" : "공간을 만들고 유효 슈팅을 시도합니다.",
+    distribution: event.outcome === "completed" ? "정확한 킥으로 공격을 시작합니다." : "전진 패스가 상대에게 차단됩니다.",
+    save: event.outcome === "saved" ? "반사적으로 몸을 날려 선방합니다!" : "슈팅에 손이 닿지 않습니다.",
+    tackle: event.outcome === "won" ? "타이밍 좋은 태클로 공격을 끊습니다." : "태클을 시도했지만 공격수가 벗어납니다.",
+    interception: event.outcome === "won" ? "패스 길을 읽고 가로챕니다." : "가로채기를 노렸지만 공이 지나갑니다.",
+    pass: event.outcome === "completed" ? "동료에게 정확히 패스를 연결합니다." : "패스가 수비에 차단됩니다.",
+    "key-pass": event.outcome === "completed" ? "수비 사이로 날카로운 킬패스를 보냅니다." : "킬패스를 노렸지만 수비가 읽었습니다.",
+    dribble: event.outcome === "completed" ? "개인기로 압박을 벗어나 전진합니다." : "돌파를 시도하다 공을 빼앗깁니다.",
+    shot: event.outcome === "on-target" ? "공간을 만들고 유효 슈팅을 시도합니다." : "슈팅이 골문을 벗어납니다.",
+    goal: event.contribution === "goal" ? "실제 득점 장면을 마무리합니다!" : "실제 득점으로 이어지는 도움을 기록합니다!",
   }[event.type];
   return `${event.minute}' ${player.name}, ${flow}${action}`;
 }
 
-function personalEvents(player, fixture, result, selection, random) {
+function personalEvents(player, fixture, selection, random) {
   if (selection === "out") return [];
   const types = positionEventTypes(player.preferredPosition).slice(selection === "starter" ? 0 : 1, selection === "starter" ? 3 : 3);
   const start = selection === "starter" ? 16 : 68;
-  const teamGoals = fixture.home === player.clubId ? result.home : result.away;
-  let availableGoals = teamGoals;
-  let availableAssists = teamGoals;
   return types.map((type, index) => {
-    const outcome = type === "key-pass" && availableAssists > 0 && random() > 0.6 ? (availableAssists -= 1, "assist")
-      : type === "shot" && availableGoals > 0 && random() > 0.7 ? (availableGoals -= 1, "goal")
-        : ["save", "tackle", "interception", "pass", "distribution", "dribble"].includes(type) ? "completed" : "on-target";
     return {
       id: `${fixture.id || fixture.round}-player-${index}`,
       minute: start + index * 18,
@@ -451,11 +475,29 @@ function personalEvents(player, fixture, result, selection, random) {
       playerId: null,
       playerName: player.name,
       targetPlayerId: null,
-      outcome,
+      outcome: playerActionOutcome(player, type, random),
       zone: type === "save" || type === "distribution" ? "goal" : type === "tackle" || type === "interception" ? "defense" : type === "pass" ? "midfield" : "box",
       personal: true,
       variant: index % 2,
     };
+  });
+}
+
+function attributeGoalContributions(events, personal, player, selection) {
+  let goals = personal.filter(({ type, outcome }) => type === "shot" && outcome === "on-target").length;
+  let assists = personal.filter(({ type, outcome }) => type === "key-pass" && outcome === "completed").length;
+  const entryMinute = selection === "bench" ? 65 : 0;
+  return events.map((event) => {
+    if (event.type !== "goal" || event.teamId !== player.clubId || event.minute < entryMinute) return event;
+    if (goals > 0) {
+      goals -= 1;
+      return { ...event, personal: true, playerName: player.name, contribution: "goal" };
+    }
+    if (assists > 0) {
+      assists -= 1;
+      return { ...event, personal: true, playerName: player.name, contribution: "assist" };
+    }
+    return event;
   });
 }
 
@@ -471,8 +513,9 @@ export function createPlayerMatch(player, fixture, world, random = Math.random) 
   const completedFixture = outcome.season.fixtures[round]?.find(({ id }) => id === scheduledFixture?.id);
   if (!completedFixture?.result) throw new Error("경기 결과를 만들 수 없습니다.");
   const result = Object.freeze({ home: completedFixture.result.home, away: completedFixture.result.away });
-  const personal = personalEvents(player, completedFixture, result, selection, random);
-  const ordered = [...completedFixture.result.events, ...personal]
+  const personal = personalEvents(player, completedFixture, selection, random);
+  const shared = attributeGoalContributions(completedFixture.result.events, personal, player, selection);
+  const ordered = [...shared, ...personal]
     .sort((left, right) => left.minute - right.minute || left.id.localeCompare(right.id));
   const events = freezeEvents(ordered.map((event, index, all) => ({
     ...event,
@@ -480,7 +523,6 @@ export function createPlayerMatch(player, fixture, world, random = Math.random) 
       ? playerEventCommentary(event, player, all.slice(Math.max(0, index - 3), index))
       : commentate(event, outcome.season),
   })));
-  const personalIds = new Set(personal.map(({ id }) => id));
   return {
     id: `player-match-${completedFixture.id}`,
     player,
@@ -489,7 +531,7 @@ export function createPlayerMatch(player, fixture, world, random = Math.random) 
     selection,
     result,
     events,
-    personalEvents: Object.freeze(events.filter(({ id }) => personalIds.has(id))),
+    personalEvents: Object.freeze(events.filter(({ personal }) => personal)),
     cursor: 0,
     speed: "1x",
     recordsApplied: false,
@@ -528,19 +570,18 @@ export function summarizePlayerMatch(match) {
   if (match.recordsApplied) return { ...match.recordSummary, player: match.player, match };
   const minutes = match.selection === "starter" ? 90 : match.selection === "bench" ? 25 : 0;
   const events = match.personalEvents || [];
-  const teamGoals = match.fixture.home === match.player.clubId ? match.result.home : match.result.away;
   const summary = {
     minutes,
-    goals: Math.min(teamGoals, events.filter(({ type, outcome }) => type === "shot" && outcome === "goal").length),
-    assists: Math.min(teamGoals, events.filter(({ type, outcome }) => type === "key-pass" && outcome === "assist").length),
+    goals: events.filter(({ type, contribution }) => type === "goal" && contribution === "goal").length,
+    assists: events.filter(({ type, contribution }) => type === "goal" && contribution === "assist").length,
     passesAttempted: events.filter(({ type }) => ["pass", "key-pass", "distribution"].includes(type)).length,
     passesCompleted: events.filter(({ type, outcome }) => ["pass", "key-pass", "distribution"].includes(type) && outcome !== "failed").length,
     shots: events.filter(({ type }) => type === "shot").length,
     shotsOnTarget: events.filter(({ type, outcome }) => type === "shot" && outcome !== "off-target").length,
-    tackles: events.filter(({ type }) => type === "tackle").length,
-    interceptions: events.filter(({ type }) => type === "interception").length,
-    saves: events.filter(({ type }) => type === "save").length,
-    defending: events.filter(({ type }) => ["tackle", "interception", "save"].includes(type)).length,
+    tackles: events.filter(({ type, outcome }) => type === "tackle" && outcome === "won").length,
+    interceptions: events.filter(({ type, outcome }) => type === "interception" && outcome === "won").length,
+    saves: events.filter(({ type, outcome }) => type === "save" && outcome === "saved").length,
+    defending: events.filter(({ type, outcome }) => (type === "tackle" || type === "interception") ? outcome === "won" : type === "save" && outcome === "saved").length,
     yellowCards: events.filter(({ type }) => type === "caution").length,
     goalsAgainst: match.fixture.home === match.player.clubId ? match.result.away : match.result.home,
   };
