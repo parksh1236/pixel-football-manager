@@ -1,13 +1,26 @@
 import { calculateTable, commentate, completeRound, createSeason, FORMATIONS, formationPositions, formationSuitability, interpolateMatchState, lineupPositions, matchVisualState, migrateSeason, movePlayer, pitchPoint, scoreForEvents, swapStarter } from "./game.js";
+import { assignCareerClub, createCareerSlot, LEGACY_STORAGE_KEY, loadCareerStore, MAX_SLOTS, migrateLegacySave, parseSlots, saveCareerStore } from "./career.js";
 
-const STORAGE_KEY = "pixel-manager-season-v1";
 const app = document.querySelector("#app");
 const saveStatus = document.querySelector("#save-status");
 const roundStatus = document.querySelector("#round-status");
+const clubName = document.querySelector("#club-name");
+const careerContext = document.querySelector("#career-context");
+const careerExit = document.querySelector("#career-exit");
+const sidebar = document.querySelector(".sidebar");
+const workspace = document.querySelector(".workspace");
 let activeView = "dashboard";
 let matchRunning = false;
 let draggedMarker = null;
 let visualState = null;
+let screen = "start";
+let startView = "home";
+let selectedMode = "manager";
+let createSlotIndex = 0;
+let creationWorld = null;
+let careerStore;
+let statusMessage = "저장 준비";
+let season = createSeason();
 
 const HIGHLIGHTS = {
   shot: "assets/highlights/shot.png",
@@ -27,36 +40,84 @@ const highlightsReady = Promise.all(Object.entries(HIGHLIGHTS).map(async ([type,
   }
 }));
 
-function validSeason(value) {
-  return (value?.version === 1 || value?.version === 2)
-    && Array.isArray(value.teams)
-    && value.teams.length === 8
-    && Array.isArray(value.players)
-    && value.players.length === 18
-    && Array.isArray(value.fixtures)
-    && value.fixtures.length === 14
-    && Array.isArray(value.completedRoundIds);
+const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+}[character]));
+
+function normalizeStore(activeSlotId, slots) {
+  const slotResults = parseSlots(slots);
+  return { activeSlotId, slots, slotResults };
 }
 
-function loadSeason() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (validSeason(saved)) return migrateSeason(saved);
-  } catch {
-    saveStatus.textContent = "새 시즌 복구";
+function activeSlotResult() {
+  return careerStore?.slotResults.find((result) => result.ok && result.slot.id === careerStore.activeSlotId);
+}
+
+function firstOpenSlot(store = careerStore) {
+  for (let index = 0; index < MAX_SLOTS; index += 1) {
+    if (index >= store.slots.length) return index;
   }
-  return createSeason();
+  return -1;
 }
 
-let season = loadSeason();
+function initializeCareerStore() {
+  const loaded = loadCareerStore(localStorage);
+  statusMessage = loaded.error || "저장 준비";
+  const imported = loaded.slotResults.some((result) => result.ok && result.slot.career.legacyImportId === LEGACY_STORAGE_KEY);
+  if (imported) return loaded;
+
+  let rawLegacy;
+  try {
+    rawLegacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+  } catch {
+    statusMessage = "기존 시즌을 읽지 못했습니다.";
+    return loaded;
+  }
+  const openIndex = firstOpenSlot(loaded);
+  if (!rawLegacy || openIndex < 0) return loaded;
+  const validSlots = loaded.slotResults.flatMap((result) => result.ok ? [result.slot] : []);
+  const migration = migrateLegacySave(rawLegacy, validSlots);
+  if (!migration.migrated) return loaded;
+  const importedSlot = migration.slots.find((slot) => slot.career.legacyImportId === LEGACY_STORAGE_KEY);
+  const slots = [...loaded.slots];
+  slots[openIndex] = importedSlot;
+  const next = normalizeStore(loaded.activeSlotId, slots);
+  const saved = saveCareerStore(localStorage, next);
+  if (!saved.ok) {
+    statusMessage = saved.error;
+    return next;
+  }
+  try {
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch {
+    statusMessage = "커리어 저장 완료 · 기존 저장 정리 실패";
+    return next;
+  }
+  statusMessage = "기존 시즌을 슬롯으로 가져왔습니다.";
+  return next;
+}
+
+function updateActiveSlotInMemory(nextActiveSlotId = careerStore.activeSlotId) {
+  const result = activeSlotResult();
+  if (!result) return careerStore;
+  const nextSlot = {
+    ...result.slot,
+    round: season.round,
+    season: Number.isInteger(season.season) ? season.season : result.slot.season,
+    savedAt: new Date().toISOString(),
+    world: season,
+  };
+  const slots = careerStore.slots.map((slot, index) => index === result.index ? nextSlot : slot);
+  return normalizeStore(nextActiveSlotId, slots);
+}
 
 function saveSeason() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(season));
-    saveStatus.textContent = "저장 완료";
-  } catch {
-    saveStatus.textContent = "저장 실패";
-  }
+  const next = updateActiveSlotInMemory();
+  const saved = saveCareerStore(localStorage, next);
+  careerStore = next;
+  statusMessage = saved.ok ? "저장 완료" : saved.error;
+  saveStatus.textContent = statusMessage;
+  return saved;
 }
 
 const team = (id) => season.teams.find((item) => item.id === id);
@@ -66,6 +127,123 @@ const userFixture = (round = season.round) => season.fixtures[round]?.find(
 
 function header(title, description, kicker = "CLUB HQ") {
   return `<div class="page-heading"><div><span class="kicker">${kicker}</span><h1>${title}</h1></div><p>${description}</p></div>`;
+}
+
+function slotClub(slot) {
+  return slot.world.teams?.find(({ id }) => id === slot.clubId)?.name || slot.clubId;
+}
+
+function slotCard(index) {
+  const result = careerStore.slotResults[index];
+  if (result?.ok) {
+    const slot = result.slot;
+    return `<article class="slot-card">
+      <div class="slot-number">SLOT ${index + 1}</div>
+      <span class="mode-badge">${slot.mode === "manager" ? "감독 모드" : "선수 모드"}</span>
+      <h2>${escapeHtml(slot.name)}</h2>
+      <dl><div><dt>구단</dt><dd>${escapeHtml(slotClub(slot))}</dd></div><div><dt>시즌</dt><dd>${slot.season}</dd></div><div><dt>라운드</dt><dd>${slot.round}</dd></div></dl>
+      <time datetime="${slot.savedAt}">${new Date(slot.savedAt).toLocaleString("ko-KR")}</time>
+      <button class="primary-button" data-slot-action="continue" data-slot-index="${index}">이어하기</button>
+    </article>`;
+  }
+  if (index < careerStore.slots.length) {
+    return `<article class="slot-card corrupt-slot"><div class="slot-number">SLOT ${index + 1}</div><span class="mode-badge">복구 불가</span><h2>손상된 저장</h2><p>${escapeHtml(result?.error || "저장 슬롯을 읽을 수 없습니다.")}</p><button class="secondary-button" data-slot-action="overwrite" data-slot-index="${index}">새 커리어로 덮어쓰기</button></article>`;
+  }
+  return `<article class="slot-card empty-slot"><div class="slot-number">SLOT ${index + 1}</div><h2>빈 슬롯</h2><p>새 감독 또는 선수 커리어를 시작하세요.</p><button class="secondary-button" data-slot-action="create" data-slot-index="${index}">이 슬롯에 새 커리어</button></article>`;
+}
+
+function renderStart() {
+  const descriptions = {
+    home: "세 개의 독립된 저장 슬롯에서 커리어를 시작하거나 이어가세요.",
+    continue: "계속할 커리어 슬롯을 선택하세요.",
+    manage: "손상된 슬롯은 새 커리어로 덮어쓸 수 있습니다.",
+  };
+  app.innerHTML = `${header("CAREER SELECT", descriptions[startView], "PIXEL TOUCHLINE")}
+    <div class="start-actions" aria-label="커리어 메뉴">
+      <button class="primary-button" data-start-view="new">새 커리어</button>
+      <button class="secondary-button" data-start-view="continue">이어하기</button>
+      <button class="secondary-button" data-start-view="manage">저장 관리</button>
+    </div>
+    <div class="slot-grid">${Array.from({ length: MAX_SLOTS }, (_, index) => slotCard(index)).join("")}</div>`;
+}
+
+function clubOptions(selected = "team-0") {
+  return creationWorld.teams.map((club) => `<option value="${club.id}" ${club.id === selected ? "selected" : ""}>${escapeHtml(club.name)}</option>`).join("");
+}
+
+function renderCreate() {
+  const form = selectedMode === "manager"
+    ? `<form class="career-form" id="manager-create-form">
+        <label>감독 이름<input name="name" maxlength="30" required autocomplete="name"></label>
+        <label>국가<input name="nationality" maxlength="30" required value="대한민국"></label>
+        <label>담당 구단<select name="clubId">${clubOptions()}</select></label>
+        <button class="primary-button" type="submit">감독 커리어 시작</button>
+      </form>`
+    : `<form class="career-form" id="player-create-route" data-route="player-create">
+        <p>선수 생성 기능은 이후 단계에서 확장됩니다. 지금은 이름과 시작 구단으로 저장 슬롯을 만듭니다.</p>
+        <label>선수 이름<input name="name" maxlength="30" required></label>
+        <label>시작 구단<select name="clubId">${clubOptions()}</select></label>
+        <button class="primary-button" type="submit">선수 커리어 시작</button>
+      </form>`;
+  app.innerHTML = `${header("NEW CAREER", `SLOT ${createSlotIndex + 1}에 새 커리어를 만듭니다.`, "CREATE")}
+    <div class="mode-picker" aria-label="커리어 모드 선택">
+      <button class="choice-button" data-career-mode="manager" aria-pressed="${selectedMode === "manager"}">감독 모드</button>
+      <button class="choice-button" data-career-mode="player" aria-pressed="${selectedMode === "player"}">선수 모드</button>
+    </div>
+    <section class="panel create-panel"><div class="panel-body">${form}<button class="secondary-button" id="cancel-create" type="button">취소</button></div></section>`;
+}
+
+function renderPlayerCareer() {
+  const slot = activeSlotResult().slot;
+  app.innerHTML = `${header("PLAYER CAREER", `${escapeHtml(slot.name)}의 선수 커리어입니다.`, "PLAYER MODE")}
+    <section class="panel player-placeholder"><div class="panel-body"><span class="mode-badge">SLOT ${activeSlotResult().index + 1}</span><h2>선수 생성 경로 연결 완료</h2><p>훈련, 경기 출전, 계약 화면은 다음 구현 단계에서 이 경로에 연결됩니다.</p></div></section>`;
+}
+
+function beginCreation(index) {
+  createSlotIndex = index;
+  selectedMode = "manager";
+  creationWorld = createSeason();
+  screen = "create";
+  render();
+  app.focus();
+}
+
+function activateSlot(index) {
+  const result = careerStore.slotResults[index];
+  if (!result?.ok) return;
+  season = migrateSeason(result.slot.world);
+  const next = normalizeStore(result.slot.id, careerStore.slots);
+  const saved = saveCareerStore(localStorage, next);
+  careerStore = next;
+  statusMessage = saved.ok ? "커리어 불러오기 완료" : saved.error;
+  screen = "active";
+  activeView = "dashboard";
+  render();
+  app.focus();
+}
+
+function createCareer(form) {
+  const data = new FormData(form);
+  const name = String(data.get("name") || "").trim();
+  if (!name) return;
+  const selectedClubId = String(data.get("clubId") || "team-0");
+  const world = assignCareerClub(creationWorld, selectedClubId);
+  const clubId = "team-0";
+  const career = selectedMode === "manager"
+    ? { managerName: name, nationality: String(data.get("nationality") || "").trim(), clubId, selectedClubId }
+    : { playerName: name, clubId, selectedClubId, route: "player-create" };
+  const slot = createCareerSlot(selectedMode, name, world, career);
+  const slots = [...careerStore.slots];
+  slots[createSlotIndex] = slot;
+  const next = normalizeStore(slot.id, slots);
+  const saved = saveCareerStore(localStorage, next);
+  careerStore = next;
+  season = migrateSeason(slot.world);
+  statusMessage = saved.ok ? "새 커리어 저장 완료" : saved.error;
+  screen = "active";
+  activeView = "dashboard";
+  render();
+  app.focus();
 }
 
 function tableMarkup(limit) {
@@ -170,8 +348,31 @@ function renderSeasonEnd() {
   app.innerHTML = `${header("SEASON COMPLETE", "14라운드의 여정이 끝났습니다.", "FULL TIME")}<section class="panel season-end"><span class="kicker">FINAL POSITION</span><strong>${position}위</strong><p>${position === 1 ? "리그 챔피언입니다!" : "다음 시즌에는 더 높은 곳으로."}</p><button class="secondary-button" id="new-season">새 시즌 시작</button></section><section class="panel" style="margin-top:18px">${tableMarkup()}</section>`;
 }
 
-function render() {
+function updateChrome() {
+  const active = screen === "active" ? activeSlotResult() : null;
+  const managerActive = active?.slot.mode === "manager";
+  sidebar.hidden = !managerActive;
+  workspace.classList.toggle("single-column", !managerActive);
+  careerExit.hidden = !active;
+  saveStatus.textContent = statusMessage;
+  if (!active) {
+    careerContext.textContent = screen === "create" ? `새 커리어 · SLOT ${createSlotIndex + 1}` : "메인 메뉴";
+    clubName.textContent = "커리어 선택";
+    roundStatus.textContent = "3 SAVE SLOTS";
+    return;
+  }
+  const slot = active.slot;
+  careerContext.textContent = `${slot.mode === "manager" ? "감독" : "선수"} 모드 · SLOT ${active.index + 1}`;
+  clubName.textContent = slotClub(slot);
   roundStatus.textContent = season.round >= 14 ? "SEASON COMPLETE" : `ROUND ${String(season.round + 1).padStart(2, "0")} / 14`;
+  document.querySelector(".manager-card strong").textContent = slot.name;
+}
+
+function render() {
+  updateChrome();
+  if (screen === "start") return renderStart();
+  if (screen === "create") return renderCreate();
+  if (activeSlotResult()?.slot.mode === "player") return renderPlayerCareer();
   if (activeView === "squad") renderSquad();
   else if (activeView === "fixtures") renderFixtures();
   else if (activeView === "table") renderTable();
@@ -281,7 +482,7 @@ async function playMatch() {
   log.insertAdjacentHTML("afterend", '<button class="primary-button" id="match-complete">경기 결과 계속 보기</button>');
 }
 
-document.querySelector(".sidebar").addEventListener("click", (event) => {
+sidebar.addEventListener("click", (event) => {
   const button = event.target.closest("[data-view]");
   if (!button || matchRunning) return;
   activeView = button.dataset.view;
@@ -295,10 +496,35 @@ document.querySelector(".sidebar").addEventListener("click", (event) => {
 });
 
 app.addEventListener("click", (event) => {
+  const startButton = event.target.closest("[data-start-view]");
+  const modeButton = event.target.closest("[data-career-mode]");
+  const slotButton = event.target.closest("[data-slot-action]");
   const formation = event.target.closest("[data-formation]");
   const tactic = event.target.closest("[data-tactic]");
   const player = event.target.closest("[data-player]");
-  if (formation) {
+  if (startButton) {
+    if (startButton.dataset.startView === "new") {
+      const openIndex = firstOpenSlot();
+      if (openIndex < 0) {
+        startView = "manage";
+        statusMessage = "저장 슬롯은 최대 3개입니다.";
+        render();
+      } else beginCreation(openIndex);
+    } else {
+      startView = startButton.dataset.startView;
+      render();
+    }
+  } else if (modeButton) {
+    selectedMode = modeButton.dataset.careerMode;
+    renderCreate();
+  } else if (slotButton) {
+    const index = Number(slotButton.dataset.slotIndex);
+    if (slotButton.dataset.slotAction === "continue") activateSlot(index);
+    else beginCreation(index);
+  } else if (event.target.closest("#cancel-create")) {
+    screen = "start";
+    render();
+  } else if (formation) {
     season.formation = formation.dataset.formation;
     season.customPositions = Object.fromEntries(formationPositions(season.formation).map((position) => [position.playerId, position]));
     saveSeason();
@@ -323,6 +549,31 @@ app.addEventListener("click", (event) => {
   } else if (event.target.closest("#match-complete")) {
     renderDashboard();
   }
+});
+
+app.addEventListener("submit", (event) => {
+  if (!event.target.matches("#manager-create-form, #player-create-route")) return;
+  event.preventDefault();
+  createCareer(event.target);
+});
+
+careerExit.addEventListener("click", () => {
+  if (matchRunning) return;
+  const active = activeSlotResult();
+  const next = updateActiveSlotInMemory(null);
+  const saved = saveCareerStore(localStorage, next);
+  if (!saved.ok) {
+    careerStore = normalizeStore(active.slot.id, next.slots);
+    statusMessage = saved.error;
+    updateChrome();
+    return;
+  }
+  careerStore = next;
+  statusMessage = "저장 완료";
+  screen = "start";
+  startView = "home";
+  render();
+  app.focus();
 });
 
 app.addEventListener("pointerdown", (event) => {
@@ -366,4 +617,10 @@ window.addEventListener("resize", () => {
   if (canvas) drawPitch(canvas);
 });
 
+careerStore = initializeCareerStore();
+const restored = activeSlotResult();
+if (restored) {
+  season = migrateSeason(restored.slot.world);
+  screen = "active";
+}
 render();

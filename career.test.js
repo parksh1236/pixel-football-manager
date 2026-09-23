@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createSeason } from "./game.js";
-import { createCareerSlot, migrateLegacySave, parseSlots, upsertSlot } from "./career.js";
+import { assignCareerClub, createCareerSlot, loadCareerStore, migrateLegacySave, parseSlots, saveCareerStore, upsertSlot } from "./career.js";
 
 const savedAt = "2026-09-23T00:00:00.000Z";
 const slot = (name = "Seoul") => ({
@@ -80,4 +80,47 @@ test("new slots validate modes and generate ISO save timestamps", () => {
   assert.throws(() => createCareerSlot("coach", "Kim", {}, {}), /manager 또는 player/);
   assert.deepEqual(parseSlots([{ ...created, savedAt: "not-an-iso-date" }]).map(({ ok }) => ok), [false]);
   assert.deepEqual(parseSlots([{ ...created, savedAt: "2026-02-30T00:00:00.000Z" }]).map(({ ok }) => ok), [false]);
+});
+
+test("write failure is reported without mutating the store", () => {
+  const active = createCareerSlot("manager", "감독", {}, {});
+  const store = { activeSlotId: active.id, slots: [active] };
+  const storage = { setItem() { throw new Error("quota"); } };
+  const before = structuredClone(store);
+
+  assert.deepEqual(saveCareerStore(storage, store), { ok: false, error: "커리어를 저장하지 못했습니다." });
+  assert.deepEqual(store, before);
+});
+
+test("active slot and mode survive store reload", () => {
+  const active = createCareerSlot("player", "신인", {}, {});
+  const raw = JSON.stringify({ activeSlotId: active.id, slots: [active] });
+
+  const store = loadCareerStore({ getItem: () => raw });
+
+  assert.equal(store.activeSlotId, active.id);
+  assert.equal(store.slots[0].mode, "player");
+});
+
+test("loading a corrupt slot keeps neighboring careers available", () => {
+  const first = createCareerSlot("manager", "첫 감독", {}, {});
+  const third = createCareerSlot("player", "세 번째 선수", {}, {});
+  const raw = JSON.stringify({ activeSlotId: first.id, slots: [first, "{broken", third] });
+
+  const store = loadCareerStore({ getItem: () => raw });
+
+  assert.deepEqual(store.slotResults.map(({ ok }) => ok), [true, false, true]);
+  assert.equal(store.slots[0].name, "첫 감독");
+  assert.equal(store.slots[2].name, "세 번째 선수");
+});
+
+test("selected club becomes the engine user club without mutating the world", () => {
+  const world = createSeason();
+  const selectedName = world.teams.find(({ id }) => id === "team-3").name;
+  const original = structuredClone(world);
+
+  const next = assignCareerClub(world, "team-3");
+
+  assert.equal(next.teams.find(({ id }) => id === "team-0").name, selectedName);
+  assert.deepEqual(world, original);
 });

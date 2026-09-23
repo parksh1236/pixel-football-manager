@@ -1,5 +1,7 @@
 export const MAX_SLOTS = 3;
-const LEGACY_IMPORT_ID = "pixel-manager-season-v1";
+export const CAREER_STORAGE_KEY = "pixel-manager-careers-v1";
+export const LEGACY_STORAGE_KEY = "pixel-manager-season-v1";
+const LEGACY_IMPORT_ID = LEGACY_STORAGE_KEY;
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const isMode = (value) => value === "manager" || value === "player";
@@ -40,6 +42,21 @@ export function createCareerSlot(mode, name, world, career) {
     savedAt: new Date().toISOString(),
     career: progress,
     world: league,
+  };
+}
+
+export function assignCareerClub(world, clubId) {
+  const userClub = world?.teams?.find(({ id }) => id === "team-0");
+  const selectedClub = world?.teams?.find(({ id }) => id === clubId);
+  if (!userClub || !selectedClub) throw new Error("선택한 구단을 찾을 수 없습니다.");
+  if (clubId === "team-0") return world;
+  return {
+    ...world,
+    teams: world.teams.map((club) => {
+      if (club.id === "team-0") return { ...selectedClub, id: "team-0" };
+      if (club.id === clubId) return { ...userClub, id: clubId };
+      return club;
+    }),
   };
 }
 
@@ -103,4 +120,43 @@ export function migrateLegacySave(rawLegacy, slots) {
   const slot = createCareerSlot("manager", name, legacy, { legacyImportId: LEGACY_IMPORT_ID });
   const next = upsertSlot(current, slot);
   return { migrated: true, slots: next, legacyMayBeRemoved: next.some(({ id }) => id === slot.id) };
+}
+
+export function loadCareerStore(storage) {
+  let raw;
+  try {
+    raw = storage.getItem(CAREER_STORAGE_KEY);
+  } catch {
+    return { activeSlotId: null, slots: [], slotResults: [], error: "커리어 저장 데이터를 읽지 못했습니다." };
+  }
+  if (!raw) return { activeSlotId: null, slots: [], slotResults: [] };
+
+  try {
+    const saved = JSON.parse(raw);
+    if (!isRecord(saved) || !Array.isArray(saved.slots)) throw new Error("invalid store");
+    const slots = saved.slots.slice(0, MAX_SLOTS);
+    const slotResults = parseSlots(slots);
+    const activeSlotId = slotResults.some((result) => result.ok && result.slot.id === saved.activeSlotId)
+      ? saved.activeSlotId
+      : null;
+    return {
+      activeSlotId,
+      slots: slots.map((value, index) => slotResults[index].ok ? slotResults[index].slot : value),
+      slotResults,
+    };
+  } catch {
+    return { activeSlotId: null, slots: [], slotResults: [], error: "커리어 저장 데이터를 읽지 못했습니다." };
+  }
+}
+
+export function saveCareerStore(storage, store) {
+  try {
+    storage.setItem(CAREER_STORAGE_KEY, JSON.stringify({
+      activeSlotId: store.activeSlotId ?? null,
+      slots: store.slots,
+    }));
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "커리어를 저장하지 못했습니다." };
+  }
 }

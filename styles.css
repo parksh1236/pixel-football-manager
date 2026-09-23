@@ -16,6 +16,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -31,6 +32,7 @@ body {
 
 button { font: inherit; }
 button:focus-visible, a:focus-visible { outline: 3px solid var(--amber); outline-offset: 3px; }
+input, select { font: inherit; }
 
 .skip-link { position: fixed; top: -80px; left: 12px; z-index: 20; padding: 10px; color: #000; background: var(--amber); }
 .skip-link:focus { top: 12px; }
@@ -53,8 +55,10 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--amber); outline
 .club-status { flex-wrap: wrap; justify-content: flex-end; font-size: .78rem; }
 .club-status strong { padding: 7px 10px; color: var(--amber); border: 1px solid #775d27; background: #241f14; }
 #save-status { min-width: 72px; color: var(--muted); text-align: right; }
+.header-button { min-height: 36px; padding: 7px 10px; border: 1px solid #6e5729; color: var(--amber); background: #16150f; cursor: pointer; }
 
 .workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: calc(100vh - 78px); }
+.workspace.single-column { grid-template-columns: minmax(0, 1fr); }
 .sidebar { padding: 24px 16px; border-right: 2px solid var(--line); background: rgba(8,17,31,.94); }
 .eyebrow { margin: 0 8px 18px; letter-spacing: .14em; }
 .nav-button {
@@ -108,6 +112,32 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--amber); outline
 .primary-button:hover { filter: brightness(1.1); }
 .primary-button:disabled { cursor: not-allowed; filter: grayscale(1); opacity: .5; }
 .secondary-button { color: var(--amber); border-color: #6e5729; }
+
+.start-actions { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 10px; margin-bottom: 22px; }
+.start-actions .primary-button { margin-top: 0; }
+.slot-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.slot-card { min-height: 300px; display: flex; flex-direction: column; padding: 18px; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+.slot-card h2 { margin: 14px 0 10px; overflow-wrap: anywhere; }
+.slot-card p { color: var(--muted); line-height: 1.6; }
+.slot-card dl { display: grid; gap: 8px; margin: 4px 0 16px; }
+.slot-card dl div { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); }
+.slot-card dt { color: var(--muted); }
+.slot-card dd { margin: 0; text-align: right; }
+.slot-card time { margin-top: auto; color: var(--muted); font-size: .68rem; }
+.slot-card .primary-button, .slot-card .secondary-button { margin-top: 16px; }
+.slot-number { color: var(--muted); font-size: .7rem; letter-spacing: .12em; }
+.mode-badge { align-self: flex-start; margin-top: 12px; padding: 5px 7px; color: var(--green); border: 1px solid #28744b; background: #10271f; font-size: .68rem; }
+.corrupt-slot { border-color: #713b3b; }
+.corrupt-slot .mode-badge { color: var(--red); border-color: #713b3b; background: #271414; }
+.empty-slot { border-style: dashed; }
+.mode-picker { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; max-width: 620px; margin-bottom: 18px; }
+.create-panel { max-width: 620px; }
+.career-form { display: grid; gap: 16px; }
+.career-form label { display: grid; gap: 7px; color: var(--muted); font-size: .75rem; }
+.career-form input, .career-form select { width: 100%; min-height: 44px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 0; color: var(--ink); background: #08121d; }
+.career-form input:focus, .career-form select:focus { outline: 2px solid var(--amber); outline-offset: 2px; }
+.create-panel > .panel-body > .secondary-button { width: 100%; margin-top: 10px; }
+.player-placeholder { max-width: 720px; }
 
 .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .stat { padding: 15px 8px; border: 1px solid var(--line); background: #0a1420; text-align: center; }
@@ -166,6 +196,8 @@ tr.user-row { color: var(--green); background: #10251e; }
   .brand small, #club-name { display: none; }
   #app { padding: 18px 12px 30px; }
   .dashboard-grid { grid-template-columns: 1fr; }
+  .start-actions, .slot-grid { grid-template-columns: 1fr; }
+  .slot-card { min-height: 250px; }
   .page-heading { display: block; }
   .page-heading p { margin-top: 8px; }
   .versus { gap: 8px; }
