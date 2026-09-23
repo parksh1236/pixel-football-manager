@@ -1,6 +1,6 @@
 import { calculateTable, commentate, completeRound, createSeason, FORMATIONS, formationPositions, formationSuitability, interpolateMatchState, lineupPositions, matchVisualState, migrateSeason, movePlayer, pitchPoint, scoreForEvents, swapStarter } from "./game.js";
 import { assignCareerClub, createCareerSlot, LEGACY_STORAGE_KEY, loadCareerStore, MAX_SLOTS, migrateLegacySave, parseSlots, saveCareerStore, updateActiveSlot } from "./career.js";
-import { ARCHETYPES, createCareerPlayer, createEntryOffers, validatePlayerCareerStore, validatePlayerDraft } from "./player-career.js";
+import { ARCHETYPES, createCareerPlayer, createEntryOffers, validatePlayerCareerStore, validatePlayerDraft, validatePlayerIdentity } from "./player-career.js";
 
 const app = document.querySelector("#app");
 const saveStatus = document.querySelector("#save-status");
@@ -363,7 +363,7 @@ function submitPlayerCreationStep(form) {
       foot: String(data.get("foot")),
       appearance: String(data.get("appearance")),
     };
-    const validation = validatePlayerDraft(playerDraft);
+    const validation = validatePlayerIdentity(playerDraft);
     if (!validation.ok) {
       playerCreationFailure(validation.errors.join(" "));
       return;

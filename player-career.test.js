@@ -8,6 +8,7 @@ import {
   createEntryOffers,
   validatePlayerCareerStore,
   validatePlayerDraft,
+  validatePlayerIdentity,
 } from "./player-career.js";
 
 const draft = {
@@ -43,6 +44,14 @@ test("creation rejects malformed identity fields", () => {
   ]) {
     assert.equal(validatePlayerDraft({ ...draft, ...change }).ok, false, JSON.stringify(change));
   }
+});
+
+test("step-one identity validation ignores later fields while full validation still blocks creation", () => {
+  const incompleteLaterSteps = { ...draft, preferredPosition: "invalid" };
+
+  assert.equal(validatePlayerIdentity(incompleteLaterSteps).ok, true);
+  assert.equal(validatePlayerDraft(incompleteLaterSteps).ok, false);
+  assert.throws(() => createCareerPlayer(incompleteLaterSteps));
 });
 
 test("creation rejects duplicate and malformed positions", () => {

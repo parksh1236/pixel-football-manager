@@ -9,12 +9,13 @@
 ## Checks
 
 - TDD RED: `node --test player-career.test.js` failed with `ERR_MODULE_NOT_FOUND` before `player-career.js` existed.
-- TDD GREEN: `node --test player-career.test.js career.test.js game.test.js` — 42 passed, 0 failed.
+- TDD GREEN: `node --test player-career.test.js career.test.js game.test.js` — 43 passed, 0 failed.
 - `node --check app.js` — passed.
 - `node --check player-career.js` — passed.
 - `git diff --check` — passed.
 - Browser QA: completed all three entry paths with keyboard-triggered controls at desktop and 390×844; offer counts were 1/3/3, trial save survived reload, no horizontal overflow was detected, and console errors/warnings were empty.
 - Review-fix smoke: whitespace-only identity stayed on step 1 with an inline error; a corrupt persisted player slot was isolated while a neighboring legacy no-player slot opened its fallback; console errors/warnings remained empty.
+- Validation-scope smoke at 390×844: invalid step-4 points blocked offers, returning to step 1 and submitting valid identity advanced to step 2, and revisiting step 4 still blocked offers; no horizontal overflow or console errors/warnings.
 
 ## Review Fixes
 
@@ -23,10 +24,13 @@
 - Validated trimmed identity fields before advancing from creation step 1.
 - Applied a safe default rating when building offers for unrated teams, keeping wages finite and positive.
 - Added positional needs to generated season clubs and used them in deterministic trial ranking.
+- Scoped step 1 to identity-only validation while retaining full draft validation before player creation and offer generation.
 
 ## Commit
 
-`fix: harden player career creation`
+- `feat: add player career creation`
+- `fix: harden player career creation`
+- `fix: scope player wizard validation`
 
 ## Gaps
 

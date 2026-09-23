@@ -36,7 +36,7 @@ export const ARCHETYPES = Object.freeze({
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const total = (values) => values.reduce((sum, value) => sum + value, 0);
 
-export function validatePlayerDraft(draft) {
+export function validatePlayerIdentity(draft) {
   const errors = [];
   if (!isRecord(draft)) return { ok: false, errors: ["선수 정보가 필요합니다."] };
 
@@ -48,6 +48,14 @@ export function validatePlayerDraft(draft) {
   if (!Number.isInteger(draft.height) || draft.height < 150 || draft.height > 210) errors.push("키는 150~210cm여야 합니다.");
   if (!['left', 'right'].includes(draft.foot)) errors.push("주발을 선택하세요.");
   if (typeof draft.appearance !== "string" || !draft.appearance.trim()) errors.push("외형을 선택하세요.");
+
+  return { ok: errors.length === 0, errors };
+}
+
+export function validatePlayerDraft(draft) {
+  const identity = validatePlayerIdentity(draft);
+  if (!isRecord(draft)) return identity;
+  const errors = [...identity.errors];
 
   if (!POSITIONS.includes(draft.preferredPosition)) errors.push("주 포지션을 선택하세요.");
   const secondary = Array.isArray(draft.secondaryPositions) ? draft.secondaryPositions : [];
