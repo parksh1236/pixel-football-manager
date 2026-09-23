@@ -3,12 +3,15 @@ import assert from "node:assert/strict";
 import { createCareerSlot, parseSlots } from "./career.js";
 import { createSeason } from "./game.js";
 import {
+  applyTrainingWeek,
   ARCHETYPES,
+  buildAutoSchedule,
   createCareerPlayer,
   createEntryOffers,
   validatePlayerCareerStore,
   validatePlayerDraft,
   validatePlayerIdentity,
+  validateSchedule,
 } from "./player-career.js";
 
 const draft = {
@@ -226,4 +229,69 @@ test("restored player slots isolate malformed profiles but allow legacy placehol
   assert.equal(restored.activeSlotId, null);
   assert.equal(restored.slots[1], malformedSlot);
   assert.equal(legacyRestored.activeSlotId, legacySlot.id);
+});
+
+test("automatic training protects match and recovery days", () => {
+  const schedule = buildAutoSchedule(createCareerPlayer(draft), 5, "technique", "normal");
+
+  assert.equal(schedule.length, 7);
+  assert.deepEqual(schedule.map(({ day }) => day), [0, 1, 2, 3, 4, 5, 6]);
+  assert.equal(schedule[5].type, "match");
+  assert.equal(schedule[6].type, "recovery");
+  assert.equal(validateSchedule(createCareerPlayer(draft), schedule, 5).ok, true);
+  assert.equal(validateSchedule(createCareerPlayer(draft), schedule.with(5, { day: 5, type: "rest", intensity: "low" }), 5).ok, false);
+  assert.equal(validateSchedule(createCareerPlayer(draft), schedule.with(6, { day: 6, type: "physical", intensity: "normal" }), 5).ok, false);
+});
+
+test("malformed saved training days are rejected without crashing", () => {
+  const player = { ...createCareerPlayer(draft), injuryDays: 3 };
+  const schedule = buildAutoSchedule(player, 5, "technique", "normal").with(0, null);
+
+  assert.doesNotThrow(() => validateSchedule(player, schedule, 5));
+  assert.equal(validateSchedule(player, schedule, 5).ok, false);
+  assert.throws(() => applyTrainingWeek(player, schedule, () => 1), /일정/);
+});
+
+test("injury blocks hard training", () => {
+  const player = { ...createCareerPlayer(draft), injuryDays: 3 };
+  const schedule = buildAutoSchedule(player, 5, "physical", "normal");
+
+  assert.equal(validateSchedule(player, schedule.with(0, { day: 0, type: "physical", intensity: "hard" }), 5).ok, false);
+});
+
+test("repeated focus loses efficiency and low condition raises injury risk", () => {
+  const player = {
+    ...createCareerPlayer(draft),
+    condition: 30,
+    training: { experience: 0, recentFocus: ["technique", "technique"], schedule: [] },
+  };
+  const schedule = buildAutoSchedule(player, 5, "technique", "hard");
+  const result = applyTrainingWeek(player, schedule, () => 0);
+
+  assert.ok(result.efficiency < 1);
+  assert.ok(result.player.injuryDays > 0);
+});
+
+test("rest and recovery raise condition", () => {
+  const player = { ...createCareerPlayer(draft), condition: 45 };
+  const schedule = Array.from({ length: 7 }, (_, day) => ({
+    day,
+    type: day === 5 ? "match" : day === 6 ? "recovery" : "rest",
+    intensity: "low",
+  }));
+
+  assert.ok(applyTrainingWeek(player, schedule, () => 1).player.condition > player.condition);
+});
+
+test("a valid week grows the player without mutating the input", () => {
+  const player = createCareerPlayer(draft);
+  const before = structuredClone(player);
+  const schedule = buildAutoSchedule(player, 5, "position", "normal");
+  const result = applyTrainingWeek(player, schedule, () => 1);
+
+  assert.deepEqual(player, before);
+  assert.equal(result.player.training.weeks, 1);
+  assert.ok(result.player.training.experience > player.training.experience);
+  assert.ok(result.player.positionMastery.CM > player.positionMastery.CM);
+  assert.ok(result.player.condition < player.condition);
 });

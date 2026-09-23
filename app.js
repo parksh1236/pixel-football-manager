@@ -1,6 +1,6 @@
 import { calculateTable, commentate, completeRound, createSeason, FORMATIONS, formationPositions, formationSuitability, interpolateMatchState, lineupPositions, matchVisualState, migrateSeason, movePlayer, pitchPoint, scoreForEvents, swapStarter } from "./game.js";
 import { assignCareerClub, createCareerSlot, LEGACY_STORAGE_KEY, loadCareerStore, MAX_SLOTS, migrateLegacySave, parseSlots, saveCareerStore, updateActiveSlot } from "./career.js";
-import { ARCHETYPES, createCareerPlayer, createEntryOffers, validatePlayerCareerStore, validatePlayerDraft, validatePlayerIdentity } from "./player-career.js";
+import { applyTrainingWeek, ARCHETYPES, buildAutoSchedule, createCareerPlayer, createEntryOffers, validatePlayerCareerStore, validatePlayerDraft, validatePlayerIdentity, validateSchedule } from "./player-career.js";
 
 const app = document.querySelector("#app");
 const saveStatus = document.querySelector("#save-status");
@@ -23,6 +23,7 @@ let playerCreationStep = 1;
 let playerCreationError = "";
 let playerOfferState = null;
 let playerDraft = null;
+let playerTrainingMessage = "";
 let careerStore;
 let statusMessage = "저장 준비";
 let season = createSeason();
@@ -42,6 +43,10 @@ const ATTRIBUTE_LABELS = {
   pace: "속도", finishing: "골 결정력", passing: "패스", dribbling: "드리블", vision: "시야", flair: "천재성",
   tackling: "태클", marking: "마크", strength: "몸싸움", stamina: "활동량", heading: "헤딩", reflexes: "반사 신경",
 };
+const TRAINING_DAYS = ["월", "화", "수", "목", "금", "토", "일"];
+const TRAINING_LABELS = { technique: "기술", physical: "신체", mental: "정신", position: "포지션", recovery: "회복", rest: "휴식", match: "경기" };
+const INTENSITY_LABELS = { low: "낮음", normal: "보통", hard: "높음" };
+const PLAYER_MATCH_DAY = 5;
 const highlightsReady = Promise.all(Object.entries(HIGHLIGHTS).map(async ([type, src]) => {
   const image = new Image();
   image.src = src;
@@ -279,6 +284,34 @@ function renderCreate() {
     <section class="panel create-panel"><div class="panel-body">${form}<button class="secondary-button" id="cancel-create" type="button">취소</button></div></section>`;
 }
 
+function playerSchedule(player) {
+  const saved = player.training?.schedule;
+  return validateSchedule(player, saved, PLAYER_MATCH_DAY).ok
+    ? saved
+    : buildAutoSchedule(player, PLAYER_MATCH_DAY, player.training?.goal || "technique", player.training?.intensity || "normal");
+}
+
+function savePlayerCareer(player, successMessage) {
+  const active = activeSlotResult();
+  const slot = {
+    ...active.slot,
+    savedAt: new Date().toISOString(),
+    career: { ...active.slot.career, player },
+  };
+  const slots = careerStore.slots.map((item) => item?.id === slot.id ? slot : item);
+  const next = normalizeStore(slot.id, slots);
+  const saved = saveCareerStore(localStorage, next);
+  careerStore = next;
+  statusMessage = saved.ok ? successMessage : saved.error;
+  saveStatus.textContent = statusMessage;
+  return saved;
+}
+
+function playerStats(stats) {
+  return [["출전", stats.appearances], ["선발", stats.starts], ["분", stats.minutes], ["골", stats.goals], ["도움", stats.assists], ["평점", stats.averageRating || "-"]]
+    .map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("");
+}
+
 function renderPlayerCareer() {
   const slot = activeSlotResult().slot;
   const player = slot.career.player;
@@ -287,11 +320,36 @@ function renderPlayerCareer() {
       <section class="panel player-profile"><div class="panel-body"><p>선수 정보가 없는 이전 저장입니다. 새 선수 커리어를 만들어 주세요.</p></div></section>`;
     return;
   }
+  const schedule = playerSchedule(player);
+  const preview = applyTrainingWeek(player, schedule, () => 1);
+  const experienceGain = Math.round(preview.player.training.experience - (player.training.experience || 0));
+  const conditionChange = `${preview.conditionChange > 0 ? "+" : ""}${preview.conditionChange}`;
+  const trainingOptions = Object.entries(TRAINING_LABELS).filter(([type]) => type !== "match");
+  const warning = player.injuryDays > 0
+    ? `부상 ${player.injuryDays}일 남음 · 고강도 훈련과 경기 출전이 제한됩니다.`
+    : player.condition <= 40 ? "컨디션이 낮습니다. 고강도 훈련은 부상 위험을 높입니다." : "";
   app.innerHTML = `${header("PLAYER CAREER", `${escapeHtml(slot.name)}의 선수 커리어입니다.`, "PLAYER MODE")}
+    ${warning ? `<p class="player-warning" role="status">${warning}</p>` : ""}
+    ${playerTrainingMessage ? `<p class="training-message" role="status">${escapeHtml(playerTrainingMessage)}</p>` : ""}
     <div class="player-profile-grid">
-      <section class="panel player-profile"><div class="panel-body"><span class="mode-badge">SLOT ${activeSlotResult().index + 1}</span><h2>${escapeHtml(player.name)}</h2><p>${escapeHtml(player.nationality)} · ${player.age}세 · ${player.height}cm · ${player.foot === "right" ? "오른발" : "왼발"}</p><dl><div><dt>소속</dt><dd>${escapeHtml(slotClub(slot))}</dd></div><div><dt>포지션</dt><dd>${player.preferredPosition}${player.secondaryPositions.length ? ` / ${player.secondaryPositions.join(" · ")}` : ""}</dd></div><div><dt>선수 유형</dt><dd>${ARCHETYPES[player.archetype].label}</dd></div><div><dt>역할</dt><dd>${escapeHtml(player.contract.role)}</dd></div><div><dt>주급</dt><dd>₩${player.wage.toLocaleString("ko-KR")}</dd></div><div><dt>계약</dt><dd>${player.contract.years}년</dd></div></dl></div></section>
+      <section class="panel player-profile"><div class="panel-body"><span class="mode-badge">SLOT ${activeSlotResult().index + 1}</span><h2>${escapeHtml(player.name)}</h2><p>${escapeHtml(player.nationality)} · ${player.age}세 · ${player.height}cm · ${player.foot === "right" ? "오른발" : "왼발"}</p><dl><div><dt>소속</dt><dd>${escapeHtml(slotClub(slot))}</dd></div><div><dt>주 포지션</dt><dd>${player.preferredPosition} · ${Math.round(player.positionMastery[player.preferredPosition])}%</dd></div>${player.secondaryPositions.map((position) => `<div><dt>보조 ${position}</dt><dd>${Math.round(player.positionMastery[position])}%</dd></div>`).join("")}<div><dt>선수 유형</dt><dd>${ARCHETYPES[player.archetype].label}</dd></div><div><dt>컨디션</dt><dd>${Math.round(player.condition)}%</dd></div><div><dt>잠재력</dt><dd>${player.potential}</dd></div><div><dt>시장 가치</dt><dd>₩${player.value.toLocaleString("ko-KR")}</dd></div><div><dt>주급</dt><dd>₩${player.wage.toLocaleString("ko-KR")}</dd></div><div><dt>계약</dt><dd>${escapeHtml(player.contract.role)} · ${player.contract.years}년</dd></div><div><dt>감독 신뢰</dt><dd>${Math.round(player.trust)}%</dd></div></dl></div></section>
       <section class="panel"><div class="panel-header"><h2>PLAYER ATTRIBUTES</h2><span class="kicker">OVERALL ${player.overall}</span></div><div class="panel-body attribute-summary">${Object.entries(player.attributes).map(([name, value]) => `<div><span>${ATTRIBUTE_LABELS[name]}</span><strong>${value}</strong></div>`).join("")}</div></section>
-    </div>`;
+    </div>
+    <section class="panel training-panel"><div class="panel-header"><h2>WEEKLY TRAINING</h2><span class="kicker">WEEK ${(player.training.weeks || 0) + 1}</span></div><div class="panel-body">
+      <div class="training-toolbar">
+        <label>성장 목표<select id="training-goal">${["technique", "physical", "mental", "position"].map((goal) => `<option value="${goal}" ${player.training.goal === goal ? "selected" : ""}>${TRAINING_LABELS[goal]}</option>`).join("")}</select></label>
+        <label>자동 강도<select id="training-intensity">${Object.entries(INTENSITY_LABELS).map(([value, label]) => `<option value="${value}" ${player.training.intensity === value || (!player.training.intensity && value === "normal") ? "selected" : ""} ${player.injuryDays > 0 && value === "hard" ? "disabled" : ""}>${label}</option>`).join("")}</select></label>
+        <button class="secondary-button" id="auto-training" type="button">자동 일정 만들기</button>
+      </div>
+      <div class="training-week">${schedule.map((session) => {
+        const protectedDay = session.day === PLAYER_MATCH_DAY || session.day === (PLAYER_MATCH_DAY + 1) % 7;
+        const passive = ["match", "recovery", "rest"].includes(session.type);
+        return `<article class="training-day ${protectedDay ? "protected" : ""}"><strong>${TRAINING_DAYS[session.day]}요일</strong><label>활동<select data-training-day="${session.day}" data-training-field="type" ${protectedDay ? "disabled" : ""}>${(protectedDay ? [[session.type, TRAINING_LABELS[session.type]]] : trainingOptions).map(([value, label]) => `<option value="${value}" ${session.type === value ? "selected" : ""}>${label}</option>`).join("")}</select></label><label>강도<select data-training-day="${session.day}" data-training-field="intensity" ${protectedDay || passive ? "disabled" : ""}>${Object.entries(INTENSITY_LABELS).map(([value, label]) => `<option value="${value}" ${session.intensity === value ? "selected" : ""} ${player.injuryDays > 0 && value === "hard" ? "disabled" : ""}>${label}</option>`).join("")}</select></label>${protectedDay ? '<small>보호 일정</small>' : ""}</article>`;
+      }).join("")}</div>
+      <div class="growth-preview"><div><span>예상 경험치</span><strong>+${experienceGain}</strong></div><div><span>예상 컨디션</span><strong>${conditionChange}</strong></div><div><span>훈련 효율</span><strong>${Math.round(preview.efficiency * 100)}%</strong></div></div>
+      <button class="primary-button" id="complete-training-week" type="button">이번 주 훈련 완료</button>
+    </div></section>
+    <div class="record-grid"><section class="panel"><div class="panel-header"><h2>SEASON RECORD</h2></div><dl class="record-list">${playerStats(player.seasonStats)}</dl></section><section class="panel"><div class="panel-header"><h2>CAREER RECORD</h2></div><dl class="record-list">${playerStats(player.careerStats)}</dl></section></div>`;
 }
 
 function beginCreation(index) {
@@ -705,6 +763,8 @@ app.addEventListener("click", (event) => {
   const formation = event.target.closest("[data-formation]");
   const tactic = event.target.closest("[data-tactic]");
   const player = event.target.closest("[data-player]");
+  const autoTraining = event.target.closest("#auto-training");
+  const completeTraining = event.target.closest("#complete-training-week");
   if (startButton) {
     if (startButton.dataset.startView === "new") {
       const openIndex = firstOpenSlot();
@@ -735,6 +795,27 @@ app.addEventListener("click", (event) => {
     renderCreate();
   } else if (event.target.closest("[data-offer-index]")) {
     acceptPlayerOffer(Number(event.target.closest("[data-offer-index]").dataset.offerIndex));
+  } else if (autoTraining) {
+    const current = activeSlotResult().slot.career.player;
+    const goal = document.querySelector("#training-goal").value;
+    const intensity = document.querySelector("#training-intensity").value;
+    const schedule = buildAutoSchedule(current, PLAYER_MATCH_DAY, goal, intensity);
+    const nextPlayer = { ...current, training: { ...current.training, goal, intensity, schedule } };
+    playerTrainingMessage = "자동 일정이 저장되었습니다.";
+    savePlayerCareer(nextPlayer, "훈련 일정 저장 완료");
+    renderPlayerCareer();
+  } else if (completeTraining) {
+    const current = activeSlotResult().slot.career.player;
+    try {
+      const result = applyTrainingWeek(current, playerSchedule(current), Math.random);
+      const improved = Object.values(result.growth).reduce((sum, value) => sum + value, 0);
+      playerTrainingMessage = `주간 훈련 완료 · 경험치 +${Math.round(result.player.training.experience - (current.training.experience || 0))} · 능력치 +${improved}`;
+      savePlayerCareer(result.player, "주간 훈련 저장 완료");
+      renderPlayerCareer();
+    } catch (error) {
+      playerTrainingMessage = error.message;
+      renderPlayerCareer();
+    }
   } else if (formation) {
     season.formation = formation.dataset.formation;
     season.customPositions = Object.fromEntries(formationPositions(season.formation).map((position) => [position.playerId, position]));
@@ -760,6 +841,27 @@ app.addEventListener("click", (event) => {
   } else if (event.target.closest("#match-complete")) {
     renderDashboard();
   }
+});
+
+app.addEventListener("change", (event) => {
+  const control = event.target.closest("[data-training-day]");
+  if (!control) return;
+  const current = activeSlotResult().slot.career.player;
+  const day = Number(control.dataset.trainingDay);
+  const schedule = playerSchedule(current);
+  const session = { ...schedule[day], [control.dataset.trainingField]: control.value };
+  if (["recovery", "rest"].includes(session.type)) session.intensity = "low";
+  const nextSchedule = schedule.with(day, session);
+  const validation = validateSchedule(current, nextSchedule, PLAYER_MATCH_DAY);
+  if (!validation.ok) {
+    playerTrainingMessage = validation.errors.join(" ");
+    renderPlayerCareer();
+    return;
+  }
+  const nextPlayer = { ...current, training: { ...current.training, schedule: nextSchedule } };
+  playerTrainingMessage = `${TRAINING_DAYS[day]}요일 일정이 저장되었습니다.`;
+  savePlayerCareer(nextPlayer, "훈련 일정 저장 완료");
+  renderPlayerCareer();
 });
 
 app.addEventListener("submit", (event) => {

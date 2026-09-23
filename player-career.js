@@ -246,3 +246,140 @@ export function createEntryOffers(player, path, teams) {
   }
   return [];
 }
+
+const TRAINING_TYPES = ["technique", "physical", "mental", "position", "recovery", "rest", "match"];
+const TRAINING_GOALS = ["technique", "physical", "mental", "position"];
+const TRAINING_INTENSITIES = ["low", "normal", "hard"];
+const INTENSITY_FACTOR = { low: 0.6, normal: 1, hard: 1.5 };
+const TRAINING_ATTRIBUTES = {
+  technique: ["finishing", "passing", "dribbling"],
+  physical: ["pace", "strength", "stamina", "heading"],
+  mental: ["vision", "flair", "marking", "tackling"],
+};
+const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
+
+export function buildAutoSchedule(player, matchDay, goal, intensity) {
+  const safeMatchDay = Number.isInteger(matchDay) && matchDay >= 0 && matchDay < 7 ? matchDay : 5;
+  const recoveryDay = (safeMatchDay + 1) % 7;
+  const preMatchDay = (safeMatchDay + 6) % 7;
+  const safeGoal = TRAINING_GOALS.includes(goal) ? goal : "technique";
+  const safeIntensity = TRAINING_INTENSITIES.includes(intensity) ? intensity : "normal";
+
+  return Array.from({ length: 7 }, (_, day) => {
+    if (day === safeMatchDay) return { day, type: "match", intensity: "low" };
+    if (day === recoveryDay) return { day, type: "recovery", intensity: "low" };
+    if (day === preMatchDay || player?.injuryDays > 0) return { day, type: "rest", intensity: "low" };
+    return { day, type: safeGoal, intensity: safeIntensity };
+  });
+}
+
+export function validateSchedule(player, schedule, matchDay) {
+  const errors = [];
+  const recoveryDay = (matchDay + 1) % 7;
+  if (!Number.isInteger(matchDay) || matchDay < 0 || matchDay > 6) errors.push("경기일이 올바르지 않습니다.");
+  if (!Array.isArray(schedule) || schedule.length !== 7) {
+    errors.push("월요일부터 일요일까지 7일 일정을 채우세요.");
+  } else {
+    schedule.forEach((session, day) => {
+      if (!isRecord(session) || session.day !== day || !TRAINING_TYPES.includes(session.type)
+        || !TRAINING_INTENSITIES.includes(session.intensity)) errors.push(`${day + 1}일차 일정이 올바르지 않습니다.`);
+    });
+    if (schedule[matchDay]?.type !== "match") errors.push("경기일은 변경할 수 없습니다.");
+    if (schedule[recoveryDay]?.type !== "recovery") errors.push("경기 다음 날은 회복일입니다.");
+    if (player?.injuryDays > 0 && schedule.some((session) => (
+      isRecord(session) && TRAINING_GOALS.includes(session.type) && session.intensity === "hard"
+    ))) errors.push("부상 중에는 고강도 훈련을 할 수 없습니다.");
+  }
+  return { ok: errors.length === 0, errors };
+}
+
+function focusEfficiency(recentFocus, type) {
+  let repeats = 0;
+  for (let index = recentFocus.length - 1; index >= 0 && recentFocus[index] === type; index -= 1) repeats += 1;
+  return Math.max(0.4, 1 - repeats * 0.2);
+}
+
+export function applyTrainingWeek(player, schedule, random = Math.random) {
+  const matchDay = Array.isArray(schedule) ? schedule.find((session) => session?.type === "match")?.day : undefined;
+  const validation = validateSchedule(player, schedule, matchDay);
+  if (!validation.ok) throw new Error(validation.errors.join(" "));
+
+  const attributes = { ...player.attributes };
+  const positionMastery = { ...player.positionMastery };
+  const recentFocus = [...(player.training?.recentFocus || player.recentTraining || [])].slice(-3);
+  const progress = { ...(player.training?.progress || {}) };
+  const initialCondition = clamp(player.condition, 0, 100);
+  const initialInjuryDays = Math.max(0, player.injuryDays || 0);
+  const ageFactor = player.age <= 21 ? 1 : player.age <= 25 ? 0.8 : player.age <= 29 ? 0.6 : 0.4;
+  const potentialFactor = clamp((player.potential - player.overall + 4) / 8, 0.35, 1.25);
+  const efficiencies = [];
+  let condition = initialCondition;
+  let experience = player.training?.experience || 0;
+  let injuryDays = Math.max(0, initialInjuryDays - 7);
+  let injuryRisk = 0;
+
+  for (const session of schedule) {
+    if (session.type === "rest") {
+      condition = clamp(condition + 8, 0, 100);
+      continue;
+    }
+    if (session.type === "recovery") {
+      condition = clamp(condition + 14, 0, 100);
+      continue;
+    }
+    if (session.type === "match") {
+      condition = clamp(condition - 7, 0, 100);
+      continue;
+    }
+    if (injuryDays > 0 && session.intensity === "hard") continue;
+
+    const efficiency = focusEfficiency(recentFocus, session.type);
+    const intensityFactor = INTENSITY_FACTOR[session.intensity];
+    const gained = 6 * intensityFactor * efficiency * ageFactor * potentialFactor;
+    efficiencies.push(efficiency);
+    experience += gained;
+    condition = clamp(condition - ({ low: 2, normal: 5, hard: 9 }[session.intensity]
+      + (session.type === "physical" ? 2 : 0)), 0, 100);
+
+    if (session.type === "position") {
+      for (const position of player.secondaryPositions) {
+        positionMastery[position] = clamp(positionMastery[position] + 1.5 * intensityFactor * efficiency, 0, 100);
+      }
+    } else {
+      for (const attribute of TRAINING_ATTRIBUTES[session.type]) {
+        progress[attribute] = (progress[attribute] || 0) + gained / TRAINING_ATTRIBUTES[session.type].length;
+        while (progress[attribute] >= 8 && attributes[attribute] < 20) {
+          attributes[attribute] += 1;
+          progress[attribute] -= 8;
+        }
+      }
+    }
+
+    recentFocus.push(session.type);
+    recentFocus.splice(0, Math.max(0, recentFocus.length - 3));
+    if (session.intensity === "hard" && condition < 50) {
+      const risk = clamp((50 - condition) / 100 + 0.08, 0, 0.5);
+      injuryRisk = Math.max(injuryRisk, risk);
+      if (random() < risk) injuryDays = Math.max(injuryDays, 3 + Math.ceil((50 - condition) / 10));
+    }
+  }
+
+  const overall = Math.round(total(Object.values(attributes)) / Object.keys(attributes).length);
+  const nextPlayer = {
+    ...player,
+    attributes,
+    positionMastery,
+    overall,
+    value: overall * overall * 100_000,
+    condition,
+    injuryDays,
+    training: { ...player.training, weeks: (player.training?.weeks || 0) + 1, experience, progress, recentFocus, schedule: schedule.map((session) => ({ ...session })) },
+  };
+  return {
+    player: nextPlayer,
+    efficiency: efficiencies.length ? total(efficiencies) / efficiencies.length : 1,
+    injuryRisk,
+    conditionChange: condition - initialCondition,
+    growth: Object.fromEntries(Object.keys(attributes).map((name) => [name, attributes[name] - player.attributes[name]])),
+  };
+}
