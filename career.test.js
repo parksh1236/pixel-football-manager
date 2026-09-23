@@ -32,7 +32,7 @@ test("adding a fourth slot reports Korean capacity without replacing a save", ()
   assert.deepEqual(slots.map(({ name }) => name), ["first", "second", "third"]);
 });
 
-test("legacy migration imports once and retains the complete season state", () => {
+test("legacy migration imports once and retains the complete league state in world", () => {
   const legacy = createSeason();
   legacy.round = 2;
   legacy.tactic = "attacking";
@@ -49,10 +49,24 @@ test("legacy migration imports once and retains the complete season state", () =
   assert.equal(second.migrated, false);
   assert.deepEqual(second.slots, first.slots);
   assert.equal(first.slots[0].round, 2);
-  assert.deepEqual(first.slots[0].career.fixtures, legacy.fixtures);
-  assert.deepEqual(first.slots[0].career.players, legacy.players);
-  assert.equal(first.slots[0].career.tactic, "attacking");
-  assert.equal(first.slots[0].career.formation, "4-4-2");
+  assert.equal(first.slots[0].world.round, 2);
+  assert.deepEqual(first.slots[0].world.fixtures, legacy.fixtures);
+  assert.deepEqual(first.slots[0].world.players, legacy.players);
+  assert.equal(first.slots[0].world.tactic, "attacking");
+  assert.equal(first.slots[0].world.formation, "4-4-2");
+});
+
+test("legacy import marker blocks re-import after career progress changes", () => {
+  const legacy = JSON.stringify(createSeason());
+  const first = migrateLegacySave(legacy, []);
+  const advanced = structuredClone(first.slots);
+  advanced[0].career.tactic = "defensive";
+
+  const repeated = migrateLegacySave(legacy, advanced);
+
+  assert.equal(repeated.migrated, false);
+  assert.equal(repeated.slots.length, 1);
+  assert.equal(repeated.slots[0].career.tactic, "defensive");
 });
 
 test("new slots validate modes and generate ISO save timestamps", () => {

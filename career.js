@@ -1,4 +1,5 @@
 export const MAX_SLOTS = 3;
+const LEGACY_IMPORT_ID = "pixel-manager-season-v1";
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const isMode = (value) => value === "manager" || value === "player";
@@ -27,17 +28,18 @@ function validSlot(value) {
 export function createCareerSlot(mode, name, world, career) {
   if (!isMode(mode)) throw new Error("모드는 manager 또는 player여야 합니다.");
   const progress = isRecord(career) ? career : {};
+  const league = isRecord(world) ? world : {};
   return {
     id: newId(),
     version: 1,
     mode,
     name: String(name ?? ""),
-    clubId: String(progress.clubId ?? progress.teamId ?? "team-0"),
-    season: isNonNegativeInteger(progress.season) ? progress.season : 1,
-    round: isNonNegativeInteger(progress.round) ? progress.round : 0,
+    clubId: String(progress.clubId ?? progress.teamId ?? league.clubId ?? league.teamId ?? "team-0"),
+    season: isNonNegativeInteger(progress.season) ? progress.season : isNonNegativeInteger(league.season) ? league.season : 1,
+    round: isNonNegativeInteger(progress.round) ? progress.round : isNonNegativeInteger(league.round) ? league.round : 0,
     savedAt: new Date().toISOString(),
     career: progress,
-    world: isRecord(world) ? world : {},
+    world: league,
   };
 }
 
@@ -81,8 +83,6 @@ const validLegacy = (value) => isRecord(value)
   && Array.isArray(value.fixtures)
   && Array.isArray(value.completedRoundIds);
 
-const sameLegacy = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-
 export function migrateLegacySave(rawLegacy, slots) {
   let legacy;
   try {
@@ -94,13 +94,13 @@ export function migrateLegacySave(rawLegacy, slots) {
 
   const current = Array.isArray(slots) ? slots : parseSlots(slots)
     .flatMap((result) => result.ok ? [result.slot] : []);
-  if (current.some((slot) => slot.mode === "manager" && sameLegacy(slot.career, legacy))) {
+  if (current.some((slot) => slot.mode === "manager" && slot.career?.legacyImportId === LEGACY_IMPORT_ID)) {
     return { migrated: false, slots: current, legacyMayBeRemoved: true };
   }
   if (current.length >= MAX_SLOTS) return { migrated: false, slots: current, legacyMayBeRemoved: false };
 
   const name = legacy.teams.find(({ id }) => id === "team-0")?.name || "기존 커리어";
-  const slot = createCareerSlot("manager", name, {}, legacy);
+  const slot = createCareerSlot("manager", name, legacy, { legacyImportId: LEGACY_IMPORT_ID });
   const next = upsertSlot(current, slot);
   return { migrated: true, slots: next, legacyMayBeRemoved: next.some(({ id }) => id === slot.id) };
 }
