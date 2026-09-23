@@ -15,8 +15,10 @@
 - Review RED/GREEN: reconciled personal goals and assists onto the existing shared goal event IDs, so personal commentary and records cannot create a second scoring timeline.
 - Review RED/GREEN: detailed action outcomes now use the relevant attributes, condition, and positional mastery; equal-overall finishing 16/6 players diverge deterministically under the same random value.
 - Self-review RED/GREEN: bench players can only receive a goal contribution from shared goals after their 65th-minute entry.
+- Second-review RED/GREEN: attributed scorers now update the actual goal, its paired scoring shot, and the persisted shared-world fixture events with the same player ID while retaining result, minute, and event IDs.
+- Second-review RED/GREEN: the app's live rating now reads goal/assist `contribution` values through the tested shared rating helper.
 - Review RED/GREEN: accepted an unscheduled fixture request by resolving it to the matching shared-world fixture and completing its whole round.
-- Final `node --test player-career.test.js career.test.js game.test.js` — 62 passed, 0 failed.
+- Final `node --test player-career.test.js career.test.js game.test.js` — 64 passed, 0 failed.
 - `node --check app.js`, `node --check player-career.js`, `node --check game.js`, and `node --check player-career.test.js` — passed.
 - `git diff --check` — passed; Git only reported the repository's LF→CRLF checkout warnings.
 
@@ -32,6 +34,7 @@
 - Confirmed a completed match returns an applied marker and the already-updated player so a second completion call cannot duplicate records.
 - Confirmed player autosave persists both the updated profile and the shared advanced world.
 - Confirmed goal and assist records count only contributions attached to actual shared team goal events.
+- Confirmed displayed and persisted scorer IDs agree on both the goal and its paired scoring shot.
 - Fixed both correctness issues found during review; no remaining Critical or Important findings were identified.
 
 ## Gap

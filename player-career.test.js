@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createCareerSlot, parseSlots } from "./career.js";
-import { createSeason } from "./game.js";
+import { completeRound, createSeason } from "./game.js";
 import {
   applyTrainingWeek,
   ARCHETYPES,
@@ -10,6 +10,7 @@ import {
   createCareerPlayer,
   createEntryOffers,
   createPlayerMatch,
+  ratePlayerEvents,
   selectPlayerStatus,
   summarizePlayerMatch,
   validatePlayerCareerStore,
@@ -534,4 +535,61 @@ test("a bench player cannot receive a goal from before entering the match", () =
 
   assert.equal(match.selection, "bench");
   assert.ok(match.personalEvents.filter(({ contribution }) => contribution).every(({ minute }) => minute >= 65));
+});
+
+test("attributed scorer agrees across paired shot, timeline, and persisted world result", () => {
+  const baselineWorld = createSeason();
+  const fixture = baselineWorld.fixtures[0].find(({ home, away }) => home === "team-0" || away === "team-0");
+  const baseline = completeRound(baselineWorld, () => 0.8, fixture.round).season.fixtures[fixture.round].find(({ id }) => id === fixture.id).result;
+  const player = contractedPlayer({
+    id: "career-player-test",
+    preferredPosition: "ST",
+    secondaryPositions: [],
+    positionMastery: { ST: 100 },
+    trust: 100,
+    condition: 100,
+    attributes: { ...contractedPlayer().attributes, finishing: 20 },
+  });
+  const match = createPlayerMatch(player, fixture, createSeason(), () => 0.8);
+  const goal = match.events.find(({ contribution }) => contribution === "goal");
+  const shot = match.events.find(({ minute, type, teamId, outcome }) => (
+    minute === goal.minute - 1 && type === "shot" && teamId === goal.teamId && outcome === "goal"
+  ));
+  const persisted = match.world.fixtures[fixture.round].find(({ id }) => id === fixture.id).result;
+  const persistedGoal = persisted.events.find(({ id }) => id === goal.id);
+  const persistedShot = persisted.events.find(({ id }) => id === shot.id);
+  const baselineGoal = baseline.events.find(({ id }) => id === goal.id);
+
+  assert.deepEqual(match.result, { home: baseline.home, away: baseline.away });
+  assert.equal(goal.minute, baselineGoal.minute);
+  assert.equal(goal.id, baselineGoal.id);
+  assert.equal(goal.playerId, player.id);
+  assert.equal(shot.playerId, player.id);
+  assert.equal(persistedGoal.playerId, player.id);
+  assert.equal(persistedShot.playerId, player.id);
+  assert.equal(persistedGoal.contribution, "goal");
+});
+
+test("live rating rewards attributed goal and assist contributions", () => {
+  const contribution = (changes, type) => {
+    const world = createSeason();
+    const fixture = world.fixtures[0].find(({ home, away }) => home === "team-0" || away === "team-0");
+    const player = contractedPlayer({ trust: 100, condition: 100, secondaryPositions: [], ...changes });
+    return createPlayerMatch(player, fixture, world, () => 0.8).events.find((event) => event.contribution === type);
+  };
+  const goal = contribution({
+    preferredPosition: "ST",
+    positionMastery: { ST: 100 },
+    attributes: { ...contractedPlayer().attributes, finishing: 20 },
+  }, "goal");
+  const assist = contribution({
+    preferredPosition: "CM",
+    positionMastery: { CM: 100 },
+    attributes: { ...contractedPlayer().attributes, passing: 20, vision: 20, flair: 20 },
+  }, "assist");
+
+  assert.equal(goal.outcome, "scored");
+  assert.equal(assist.outcome, "scored");
+  assert.equal(ratePlayerEvents([goal, assist], "starter"), 8);
+  assert.equal(ratePlayerEvents([goal, assist], "out"), null);
 });

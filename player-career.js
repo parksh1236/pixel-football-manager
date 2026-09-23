@@ -456,7 +456,7 @@ function playerEventCommentary(event, player, previous) {
     pass: event.outcome === "completed" ? "동료에게 정확히 패스를 연결합니다." : "패스가 수비에 차단됩니다.",
     "key-pass": event.outcome === "completed" ? "수비 사이로 날카로운 킬패스를 보냅니다." : "킬패스를 노렸지만 수비가 읽었습니다.",
     dribble: event.outcome === "completed" ? "개인기로 압박을 벗어나 전진합니다." : "돌파를 시도하다 공을 빼앗깁니다.",
-    shot: event.outcome === "on-target" ? "공간을 만들고 유효 슈팅을 시도합니다." : "슈팅이 골문을 벗어납니다.",
+    shot: event.outcome === "goal" ? "골로 이어지는 슈팅을 시도합니다!" : event.outcome === "on-target" ? "공간을 만들고 유효 슈팅을 시도합니다." : "슈팅이 골문을 벗어납니다.",
     goal: event.contribution === "goal" ? "실제 득점 장면을 마무리합니다!" : "실제 득점으로 이어지는 도움을 기록합니다!",
   }[event.type];
   return `${event.minute}' ${player.name}, ${flow}${action}`;
@@ -487,18 +487,29 @@ function attributeGoalContributions(events, personal, player, selection) {
   let goals = personal.filter(({ type, outcome }) => type === "shot" && outcome === "on-target").length;
   let assists = personal.filter(({ type, outcome }) => type === "key-pass" && outcome === "completed").length;
   const entryMinute = selection === "bench" ? 65 : 0;
-  return events.map((event) => {
+  const playerId = player.id || "career-player";
+  const attributed = events.map((event) => {
     if (event.type !== "goal" || event.teamId !== player.clubId || event.minute < entryMinute) return event;
     if (goals > 0) {
       goals -= 1;
-      return { ...event, personal: true, playerName: player.name, contribution: "goal" };
+      return { ...event, playerId, scorerPlayerId: playerId, personal: true, playerName: player.name, contribution: "goal" };
     }
     if (assists > 0) {
       assists -= 1;
-      return { ...event, personal: true, playerName: player.name, contribution: "assist" };
+      return { ...event, assistPlayerId: playerId, personal: true, playerName: player.name, contribution: "assist" };
     }
     return event;
   });
+  attributed.forEach((event, index) => {
+    if (event.contribution !== "goal") return;
+    const shotIndex = attributed.findLastIndex((candidate, candidateIndex) => candidateIndex < index
+      && candidate.minute === event.minute - 1 && candidate.type === "shot"
+      && candidate.teamId === event.teamId && candidate.outcome === "goal");
+    if (shotIndex >= 0) attributed[shotIndex] = {
+      ...attributed[shotIndex], playerId, scorerPlayerId: playerId, playerName: player.name, careerPlayer: true,
+    };
+  });
+  return attributed;
 }
 
 const freezeEvents = (events) => Object.freeze(events.map((event) => Object.freeze(event)));
@@ -515,11 +526,12 @@ export function createPlayerMatch(player, fixture, world, random = Math.random) 
   const result = Object.freeze({ home: completedFixture.result.home, away: completedFixture.result.away });
   const personal = personalEvents(player, completedFixture, selection, random);
   const shared = attributeGoalContributions(completedFixture.result.events, personal, player, selection);
+  completedFixture.result.events = shared;
   const ordered = [...shared, ...personal]
     .sort((left, right) => left.minute - right.minute || left.id.localeCompare(right.id));
   const events = freezeEvents(ordered.map((event, index, all) => ({
     ...event,
-    commentary: event.personal
+    commentary: event.personal || event.careerPlayer
       ? playerEventCommentary(event, player, all.slice(Math.max(0, index - 3), index))
       : commentate(event, outcome.season),
   })));
@@ -542,6 +554,18 @@ export function consumePlayerEvent(match, cursor = match.cursor) {
   const index = clamp(Number.isInteger(cursor) ? cursor : match.cursor || 0, 0, match.events.length);
   if (index >= match.events.length) return { event: null, match: { ...match, cursor: match.events.length } };
   return { event: match.events[index], match: { ...match, cursor: index + 1 } };
+}
+
+export function ratePlayerEvents(events, selection) {
+  if (selection === "out") return null;
+  const personal = events.filter(({ personal }) => personal);
+  if (!personal.length) return null;
+  const bonus = personal.reduce((sum, event) => {
+    if (event.contribution === "goal") return sum + 1.2;
+    if (event.contribution === "assist") return sum + 0.8;
+    return sum + Number(["completed", "saved", "won", "on-target"].includes(event.outcome)) * 0.15;
+  }, 0);
+  return clamp(6 + bonus, 1, 10);
 }
 
 function addMatchStats(stats, summary, selection, position) {

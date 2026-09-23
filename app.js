@@ -1,6 +1,6 @@
 import { calculateTable, commentate, completeRound, createSeason, FORMATIONS, formationPositions, formationSuitability, interpolateMatchState, lineupPositions, matchVisualState, migrateSeason, movePlayer, pitchPoint, scoreForEvents, swapStarter } from "./game.js";
 import { assignCareerClub, createCareerSlot, LEGACY_STORAGE_KEY, loadCareerStore, MAX_SLOTS, migrateLegacySave, parseSlots, saveCareerStore, updateActiveSlot } from "./career.js";
-import { applyTrainingWeek, ARCHETYPES, buildAutoSchedule, consumePlayerEvent, createCareerPlayer, createEntryOffers, createPlayerMatch, summarizePlayerMatch, validatePlayerCareerStore, validatePlayerDraft, validatePlayerIdentity, validateSchedule } from "./player-career.js";
+import { applyTrainingWeek, ARCHETYPES, buildAutoSchedule, consumePlayerEvent, createCareerPlayer, createEntryOffers, createPlayerMatch, ratePlayerEvents, summarizePlayerMatch, validatePlayerCareerStore, validatePlayerDraft, validatePlayerIdentity, validateSchedule } from "./player-career.js";
 
 const app = document.querySelector("#app");
 const saveStatus = document.querySelector("#save-status");
@@ -365,10 +365,8 @@ const PLAYER_HIGHLIGHTS = new Set(["kickoff", "shot", "save", "key-pass", "goal"
 const SELECTION_LABELS = { starter: "선발", bench: "벤치", out: "명단 제외" };
 
 function playerLiveRating(match) {
-  const seen = match.events.slice(0, match.cursor).filter(({ personal }) => personal);
-  if (!seen.length || match.selection === "out") return "-";
-  const bonus = seen.reduce((sum, event) => sum + (event.outcome === "goal" ? 1.2 : event.outcome === "assist" ? 0.8 : 0.15), 0);
-  return Math.min(10, 6 + bonus).toFixed(1);
+  const rating = ratePlayerEvents(match.events.slice(0, match.cursor), match.selection);
+  return rating === null ? "-" : rating.toFixed(1);
 }
 
 function renderPlayerMatch() {
