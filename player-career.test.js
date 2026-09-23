@@ -6,8 +6,12 @@ import {
   applyTrainingWeek,
   ARCHETYPES,
   buildAutoSchedule,
+  consumePlayerEvent,
   createCareerPlayer,
   createEntryOffers,
+  createPlayerMatch,
+  selectPlayerStatus,
+  summarizePlayerMatch,
   validatePlayerCareerStore,
   validatePlayerDraft,
   validatePlayerIdentity,
@@ -323,4 +327,150 @@ test("a valid week grows the player without mutating the input", () => {
   assert.ok(result.player.training.experience > player.training.experience);
   assert.ok(result.player.positionMastery.CM > player.positionMastery.CM);
   assert.ok(result.player.condition < player.condition);
+});
+
+const contractedPlayer = (changes = {}) => ({
+  ...createCareerPlayer(draft),
+  clubId: "team-0",
+  contract: { clubId: "team-0", role: "주전", wage: 150_000, years: 3 },
+  ...changes,
+});
+
+test("injured player is excluded while the shared world still completes the round", () => {
+  const world = createSeason();
+  const fixture = world.fixtures[0].find(({ home, away }) => home === "team-0" || away === "team-0");
+  const player = contractedPlayer({ injuryDays: 2 });
+
+  assert.equal(selectPlayerStatus(player, world.teams.find(({ id }) => id === "team-0"), () => 0.5), "out");
+  const match = createPlayerMatch(player, fixture, world, () => 0.5);
+
+  assert.equal(match.selection, "out");
+  assert.equal(match.personalEvents.length, 0);
+  assert.equal(match.world.round, 1);
+  assert.equal(match.world.completedRoundIds.includes(0), true);
+  assert.ok(Number.isInteger(match.result.home));
+  assert.ok(Number.isInteger(match.result.away));
+  assert.equal(world.round, 0);
+});
+
+test("an unscheduled fixture request resolves to the club's shared-world fixture", () => {
+  const match = createPlayerMatch(
+    contractedPlayer({ injuryDays: 2 }),
+    { home: "team-0", away: "team-1" },
+    createSeason(),
+    () => 0.5,
+  );
+
+  assert.equal(match.fixture.home === "team-0" || match.fixture.away === "team-0", true);
+  assert.ok(Number.isInteger(match.result.home));
+  assert.equal(match.world.fixtures[match.fixture.round].every(({ result }) => result !== null), true);
+});
+
+test("event cursor emits every immutable ordered event once and ends cleanly", () => {
+  const events = Object.freeze([
+    Object.freeze({ id: "a", minute: 1 }),
+    Object.freeze({ id: "b", minute: 2 }),
+  ]);
+  let match = { events, cursor: 0, speed: "1x" };
+  const seen = [];
+
+  for (const speed of ["pause", "0.5x", "2x", "highlights"]) {
+    match = { ...match, speed };
+    const consumed = consumePlayerEvent(match, match.cursor);
+    if (consumed.event) seen.push(consumed.event.id);
+    match = consumed.match;
+  }
+
+  assert.deepEqual(seen, ["a", "b"]);
+  assert.equal(match.cursor, 2);
+  assert.equal(consumePlayerEvent(match, match.cursor).event, null);
+  assert.equal(consumePlayerEvent(match, match.cursor).match.cursor, 2);
+  assert.equal(match.events, events);
+});
+
+test("an out player receives zero minutes and no personal statistics", () => {
+  const player = contractedPlayer({ injuryDays: 3 });
+  const world = createSeason();
+  const fixture = world.fixtures[0].find(({ home, away }) => home === "team-0" || away === "team-0");
+  const summary = summarizePlayerMatch(createPlayerMatch(player, fixture, world, () => 0.5));
+
+  assert.equal(summary.minutes, 0);
+  assert.equal(summary.goals, 0);
+  assert.equal(summary.assists, 0);
+  assert.equal(summary.passesCompleted, 0);
+  assert.equal(summary.shots, 0);
+  assert.equal(summary.defending, 0);
+  assert.deepEqual(summary.match.personalEvents, []);
+});
+
+test("match ids and final result remain identical at every display speed", () => {
+  const speeds = ["pause", "0.5x", "1x", "2x", "highlights"];
+  const runs = speeds.map((speed) => {
+    const world = createSeason();
+    const fixture = world.fixtures[0].find(({ home, away }) => home === "team-0" || away === "team-0");
+    const match = { ...createPlayerMatch(contractedPlayer(), fixture, world, () => 0.5), speed };
+    return { ids: match.events.map(({ id }) => id), result: match.result };
+  });
+
+  runs.slice(1).forEach((run) => assert.deepEqual(run, runs[0]));
+});
+
+test("personal events use position-specific actions and contextual commentary", () => {
+  const cases = [
+    ["GK", "goalkeeper", ["save", "distribution"]],
+    ["CB", "defender", ["tackle", "interception"]],
+    ["CM", "box-to-box", ["pass", "key-pass"]],
+    ["ST", "scorer", ["dribble", "shot"]],
+  ];
+
+  for (const [preferredPosition, archetype, allowed] of cases) {
+    const base = createCareerPlayer({ ...draft, preferredPosition, secondaryPositions: [], archetype });
+    const player = contractedPlayer({ ...base, trust: 100, condition: 100 });
+    const world = createSeason();
+    const fixture = world.fixtures[0].find(({ home, away }) => home === "team-0" || away === "team-0");
+    const match = createPlayerMatch(player, fixture, world, () => 0.99);
+
+    assert.notEqual(match.selection, "out");
+    assert.ok(match.personalEvents.length > 0);
+    assert.ok(match.personalEvents.every(({ type }) => allowed.includes(type)), preferredPosition);
+    assert.ok(match.personalEvents.every(({ commentary }) => commentary.includes(player.name)), preferredPosition);
+  }
+});
+
+test("completion applies match records, experience, and trust exactly once", () => {
+  const world = createSeason();
+  const fixture = world.fixtures[0].find(({ home, away }) => home === "team-0" || away === "team-0");
+  const player = contractedPlayer({ trust: 50, condition: 100 });
+  const match = createPlayerMatch(player, fixture, world, () => 0.99);
+  const first = summarizePlayerMatch(match);
+  const second = summarizePlayerMatch(first.match);
+
+  assert.equal(first.player.seasonStats.appearances, 1);
+  assert.equal(first.player.careerStats.appearances, 1);
+  assert.equal(first.player.training.experience > player.training.experience, true);
+  assert.notEqual(first.player.trust, player.trust);
+  assert.deepEqual(second.player, first.player);
+  assert.equal(second.match.recordsApplied, true);
+});
+
+test("personal goals and assists cannot exceed the club's actual score", () => {
+  const player = contractedPlayer();
+  const match = {
+    player,
+    selection: "starter",
+    fixture: { home: "team-0", away: "team-1" },
+    result: { home: 1, away: 0 },
+    personalEvents: [
+      { type: "shot", outcome: "goal" },
+      { type: "shot", outcome: "goal" },
+      { type: "key-pass", outcome: "assist" },
+      { type: "key-pass", outcome: "assist" },
+    ],
+    recordsApplied: false,
+  };
+
+  const summary = summarizePlayerMatch(match);
+
+  assert.equal(summary.goals, 1);
+  assert.equal(summary.assists, 1);
 });

@@ -1,3 +1,5 @@
+import { commentate, completeRound } from "./game.js";
+
 const POSITIONS = ["GK", "RB", "CB", "LB", "DM", "CM", "AM", "RW", "LW", "ST"];
 
 const archetype = (label, description, attributes) => Object.freeze({
@@ -101,6 +103,13 @@ const emptyStats = () => ({
   cleanSheets: 0,
   yellowCards: 0,
   redCards: 0,
+  passesAttempted: 0,
+  passesCompleted: 0,
+  shots: 0,
+  shotsOnTarget: 0,
+  tackles: 0,
+  interceptions: 0,
+  saves: 0,
   averageRating: 0,
 });
 
@@ -381,4 +390,170 @@ export function applyTrainingWeek(player, schedule, random = Math.random) {
     conditionChange: condition - initialCondition,
     growth: Object.fromEntries(Object.keys(attributes).map((name) => [name, attributes[name] - player.attributes[name]])),
   };
+}
+
+export function selectPlayerStatus(player, club = {}, random = Math.random) {
+  if ((player?.injuryDays || 0) > 0) return "out";
+  const mastery = Number(player?.positionMastery?.[player?.preferredPosition]) || 0;
+  const score = (Number(player?.overall) || 0) * 3
+    + mastery * 0.2
+    + clamp(Number(player?.condition) || 0, 0, 100) * 0.25
+    + clamp(Number(player?.trust) || 0, 0, 100) * 0.15
+    + (random() - 0.5) * 20;
+  const rating = teamRating(club);
+  if (score >= rating + 8) return "starter";
+  if (score >= rating - 8) return "bench";
+  return "out";
+}
+
+function positionEventTypes(position) {
+  if (position === "GK") return ["distribution", "save", "save"];
+  if (["RB", "CB", "LB"].includes(position)) return ["tackle", "interception", "tackle"];
+  if (["DM", "CM", "AM"].includes(position)) return ["pass", "key-pass", "pass"];
+  return ["dribble", "shot", "shot"];
+}
+
+function playerEventCommentary(event, player, previous) {
+  const flow = previous.at(-1)?.type === "pass" || previous.at(-1)?.type === "key-pass"
+    ? "앞선 패스 흐름을 이어 "
+    : previous.at(-1)?.type === "interception" || previous.at(-1)?.type === "tackle"
+      ? "공을 되찾은 뒤 "
+      : "";
+  const action = {
+    distribution: "정확한 킥으로 공격을 시작합니다.",
+    save: "반사적으로 몸을 날려 선방합니다!",
+    tackle: "타이밍 좋은 태클로 공격을 끊습니다.",
+    interception: "패스 길을 읽고 가로챕니다.",
+    pass: "동료에게 정확히 패스를 연결합니다.",
+    "key-pass": event.outcome === "assist" ? "수비 사이로 도움을 기록하는 킬패스를 보냅니다!" : "수비 사이로 날카로운 킬패스를 보냅니다.",
+    dribble: "개인기로 압박을 벗어나 전진합니다.",
+    shot: event.outcome === "goal" ? "침착하게 마무리해 득점합니다!" : "공간을 만들고 유효 슈팅을 시도합니다.",
+  }[event.type];
+  return `${event.minute}' ${player.name}, ${flow}${action}`;
+}
+
+function personalEvents(player, fixture, result, selection, random) {
+  if (selection === "out") return [];
+  const types = positionEventTypes(player.preferredPosition).slice(selection === "starter" ? 0 : 1, selection === "starter" ? 3 : 3);
+  const start = selection === "starter" ? 16 : 68;
+  const teamGoals = fixture.home === player.clubId ? result.home : result.away;
+  let availableGoals = teamGoals;
+  let availableAssists = teamGoals;
+  return types.map((type, index) => {
+    const outcome = type === "key-pass" && availableAssists > 0 && random() > 0.6 ? (availableAssists -= 1, "assist")
+      : type === "shot" && availableGoals > 0 && random() > 0.7 ? (availableGoals -= 1, "goal")
+        : ["save", "tackle", "interception", "pass", "distribution", "dribble"].includes(type) ? "completed" : "on-target";
+    return {
+      id: `${fixture.id || fixture.round}-player-${index}`,
+      minute: start + index * 18,
+      type,
+      teamId: player.clubId,
+      playerId: null,
+      playerName: player.name,
+      targetPlayerId: null,
+      outcome,
+      zone: type === "save" || type === "distribution" ? "goal" : type === "tackle" || type === "interception" ? "defense" : type === "pass" ? "midfield" : "box",
+      personal: true,
+      variant: index % 2,
+    };
+  });
+}
+
+const freezeEvents = (events) => Object.freeze(events.map((event) => Object.freeze(event)));
+
+export function createPlayerMatch(player, fixture, world, random = Math.random) {
+  const club = world.teams.find(({ id }) => id === player.clubId) || {};
+  const selection = selectPlayerStatus(player, club, random);
+  const requested = world.fixtures.flat().find(({ id, home, away }) => id === fixture.id || (home === fixture.home && away === fixture.away));
+  const round = requested?.round ?? fixture.round ?? world.round;
+  const scheduledFixture = requested || world.fixtures[round]?.find(({ home, away }) => home === player.clubId || away === player.clubId);
+  const outcome = completeRound(world, random, round);
+  const completedFixture = outcome.season.fixtures[round]?.find(({ id }) => id === scheduledFixture?.id);
+  if (!completedFixture?.result) throw new Error("경기 결과를 만들 수 없습니다.");
+  const result = Object.freeze({ home: completedFixture.result.home, away: completedFixture.result.away });
+  const personal = personalEvents(player, completedFixture, result, selection, random);
+  const ordered = [...completedFixture.result.events, ...personal]
+    .sort((left, right) => left.minute - right.minute || left.id.localeCompare(right.id));
+  const events = freezeEvents(ordered.map((event, index, all) => ({
+    ...event,
+    commentary: event.personal
+      ? playerEventCommentary(event, player, all.slice(Math.max(0, index - 3), index))
+      : commentate(event, outcome.season),
+  })));
+  const personalIds = new Set(personal.map(({ id }) => id));
+  return {
+    id: `player-match-${completedFixture.id}`,
+    player,
+    fixture: Object.freeze({ id: completedFixture.id, round: completedFixture.round, home: completedFixture.home, away: completedFixture.away }),
+    world: outcome.season,
+    selection,
+    result,
+    events,
+    personalEvents: Object.freeze(events.filter(({ id }) => personalIds.has(id))),
+    cursor: 0,
+    speed: "1x",
+    recordsApplied: false,
+  };
+}
+
+export function consumePlayerEvent(match, cursor = match.cursor) {
+  const index = clamp(Number.isInteger(cursor) ? cursor : match.cursor || 0, 0, match.events.length);
+  if (index >= match.events.length) return { event: null, match: { ...match, cursor: match.events.length } };
+  return { event: match.events[index], match: { ...match, cursor: index + 1 } };
+}
+
+function addMatchStats(stats, summary, selection, position) {
+  const appearances = stats.appearances + Number(summary.minutes > 0);
+  return {
+    ...stats,
+    appearances,
+    starts: stats.starts + Number(selection === "starter"),
+    minutes: stats.minutes + summary.minutes,
+    goals: stats.goals + summary.goals,
+    assists: stats.assists + summary.assists,
+    cleanSheets: stats.cleanSheets + Number(position === "GK" && summary.minutes > 0 && summary.goalsAgainst === 0),
+    yellowCards: stats.yellowCards + summary.yellowCards,
+    passesAttempted: (stats.passesAttempted || 0) + summary.passesAttempted,
+    passesCompleted: (stats.passesCompleted || 0) + summary.passesCompleted,
+    shots: (stats.shots || 0) + summary.shots,
+    shotsOnTarget: (stats.shotsOnTarget || 0) + summary.shotsOnTarget,
+    tackles: (stats.tackles || 0) + summary.tackles,
+    interceptions: (stats.interceptions || 0) + summary.interceptions,
+    saves: (stats.saves || 0) + summary.saves,
+    averageRating: appearances ? Math.round(((stats.averageRating || 0) * stats.appearances + summary.rating) / appearances * 10) / 10 : stats.averageRating,
+  };
+}
+
+export function summarizePlayerMatch(match) {
+  if (match.recordsApplied) return { ...match.recordSummary, player: match.player, match };
+  const minutes = match.selection === "starter" ? 90 : match.selection === "bench" ? 25 : 0;
+  const events = match.personalEvents || [];
+  const teamGoals = match.fixture.home === match.player.clubId ? match.result.home : match.result.away;
+  const summary = {
+    minutes,
+    goals: Math.min(teamGoals, events.filter(({ type, outcome }) => type === "shot" && outcome === "goal").length),
+    assists: Math.min(teamGoals, events.filter(({ type, outcome }) => type === "key-pass" && outcome === "assist").length),
+    passesAttempted: events.filter(({ type }) => ["pass", "key-pass", "distribution"].includes(type)).length,
+    passesCompleted: events.filter(({ type, outcome }) => ["pass", "key-pass", "distribution"].includes(type) && outcome !== "failed").length,
+    shots: events.filter(({ type }) => type === "shot").length,
+    shotsOnTarget: events.filter(({ type, outcome }) => type === "shot" && outcome !== "off-target").length,
+    tackles: events.filter(({ type }) => type === "tackle").length,
+    interceptions: events.filter(({ type }) => type === "interception").length,
+    saves: events.filter(({ type }) => type === "save").length,
+    defending: events.filter(({ type }) => ["tackle", "interception", "save"].includes(type)).length,
+    yellowCards: events.filter(({ type }) => type === "caution").length,
+    goalsAgainst: match.fixture.home === match.player.clubId ? match.result.away : match.result.home,
+  };
+  summary.rating = minutes ? clamp(Math.round((6 + summary.goals * 1.2 + summary.assists * 0.8 + summary.passesCompleted * 0.12 + summary.defending * 0.25) * 10) / 10, 1, 10) : 0;
+  const player = minutes ? {
+    ...match.player,
+    condition: clamp(match.player.condition - (match.selection === "starter" ? 12 : 5), 0, 100),
+    trust: clamp(match.player.trust + summary.rating - 6, 0, 100),
+    training: { ...match.player.training, experience: (match.player.training?.experience || 0) + Math.round(minutes / 3 + summary.rating * 2) },
+    seasonStats: addMatchStats(match.player.seasonStats, summary, match.selection, match.player.preferredPosition),
+    careerStats: addMatchStats(match.player.careerStats, summary, match.selection, match.player.preferredPosition),
+  } : { ...match.player, trust: clamp(match.player.trust - 1, 0, 100) };
+  const recordSummary = Object.freeze({ ...summary });
+  const appliedMatch = { ...match, player, recordsApplied: true, recordSummary };
+  return { ...summary, player, match: appliedMatch };
 }

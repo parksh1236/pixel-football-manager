@@ -1,6 +1,6 @@
 import { calculateTable, commentate, completeRound, createSeason, FORMATIONS, formationPositions, formationSuitability, interpolateMatchState, lineupPositions, matchVisualState, migrateSeason, movePlayer, pitchPoint, scoreForEvents, swapStarter } from "./game.js";
 import { assignCareerClub, createCareerSlot, LEGACY_STORAGE_KEY, loadCareerStore, MAX_SLOTS, migrateLegacySave, parseSlots, saveCareerStore, updateActiveSlot } from "./career.js";
-import { applyTrainingWeek, ARCHETYPES, buildAutoSchedule, createCareerPlayer, createEntryOffers, validatePlayerCareerStore, validatePlayerDraft, validatePlayerIdentity, validateSchedule } from "./player-career.js";
+import { applyTrainingWeek, ARCHETYPES, buildAutoSchedule, consumePlayerEvent, createCareerPlayer, createEntryOffers, createPlayerMatch, summarizePlayerMatch, validatePlayerCareerStore, validatePlayerDraft, validatePlayerIdentity, validateSchedule } from "./player-career.js";
 
 const app = document.querySelector("#app");
 const saveStatus = document.querySelector("#save-status");
@@ -24,6 +24,8 @@ let playerCreationError = "";
 let playerOfferState = null;
 let playerDraft = null;
 let playerTrainingMessage = "";
+let playerMatch = null;
+let playerMatchTimer = null;
 let careerStore;
 let statusMessage = "저장 준비";
 let season = createSeason();
@@ -291,12 +293,14 @@ function playerSchedule(player) {
     : buildAutoSchedule(player, PLAYER_MATCH_DAY, player.training?.goal || "technique", player.training?.intensity || "normal");
 }
 
-function savePlayerCareer(player, successMessage) {
+function savePlayerCareer(player, successMessage, world = season) {
   const active = activeSlotResult();
   const slot = {
     ...active.slot,
+    round: world.round,
     savedAt: new Date().toISOString(),
     career: { ...active.slot.career, player },
+    world,
   };
   const slots = careerStore.slots.map((item) => item?.id === slot.id ? slot : item);
   const next = normalizeStore(slot.id, slots);
@@ -328,6 +332,9 @@ function renderPlayerCareer() {
   const warning = player.injuryDays > 0
     ? `부상 ${player.injuryDays}일 남음 · 고강도 훈련과 경기 출전이 제한됩니다.`
     : player.condition <= 40 ? "컨디션이 낮습니다. 고강도 훈련은 부상 위험을 높입니다." : "";
+  const fixture = userFixture();
+  const matchPanel = fixture ? `<section class="panel player-next-match"><div class="panel-header"><h2>NEXT FIXTURE</h2><span class="kicker">ROUND ${fixture.round + 1}</span></div><div class="panel-body"><div class="versus"><div><span class="crest" style="color:${team(fixture.home).color}">${team(fixture.home).short}</span><strong class="team-name">${escapeHtml(team(fixture.home).name)}</strong></div><span class="vs-mark">VS</span><div><span class="crest" style="color:${team(fixture.away).color}">${team(fixture.away).short}</span><strong class="team-name">${escapeHtml(team(fixture.away).name)}</strong></div></div><button class="primary-button" id="start-player-match" type="button">경기 시작</button></div></section>`
+    : `<section class="panel player-next-match"><div class="panel-body season-end"><span class="kicker">SEASON COMPLETE</span><strong>시즌 일정 완료</strong></div></section>`;
   app.innerHTML = `${header("PLAYER CAREER", `${escapeHtml(slot.name)}의 선수 커리어입니다.`, "PLAYER MODE")}
     ${warning ? `<p class="player-warning" role="status">${warning}</p>` : ""}
     ${playerTrainingMessage ? `<p class="training-message" role="status">${escapeHtml(playerTrainingMessage)}</p>` : ""}
@@ -335,6 +342,7 @@ function renderPlayerCareer() {
       <section class="panel player-profile"><div class="panel-body"><span class="mode-badge">SLOT ${activeSlotResult().index + 1}</span><h2>${escapeHtml(player.name)}</h2><p>${escapeHtml(player.nationality)} · ${player.age}세 · ${player.height}cm · ${player.foot === "right" ? "오른발" : "왼발"}</p><dl><div><dt>소속</dt><dd>${escapeHtml(slotClub(slot))}</dd></div><div><dt>주 포지션</dt><dd>${player.preferredPosition} · ${Math.round(player.positionMastery[player.preferredPosition])}%</dd></div>${player.secondaryPositions.map((position) => `<div><dt>보조 ${position}</dt><dd>${Math.round(player.positionMastery[position])}%</dd></div>`).join("")}<div><dt>선수 유형</dt><dd>${ARCHETYPES[player.archetype].label}</dd></div><div><dt>컨디션</dt><dd>${Math.round(player.condition)}%</dd></div><div><dt>잠재력</dt><dd>${player.potential}</dd></div><div><dt>시장 가치</dt><dd>₩${player.value.toLocaleString("ko-KR")}</dd></div><div><dt>주급</dt><dd>₩${player.wage.toLocaleString("ko-KR")}</dd></div><div><dt>계약</dt><dd>${escapeHtml(player.contract.role)} · ${player.contract.years}년</dd></div><div><dt>감독 신뢰</dt><dd>${Math.round(player.trust)}%</dd></div></dl></div></section>
       <section class="panel"><div class="panel-header"><h2>PLAYER ATTRIBUTES</h2><span class="kicker">OVERALL ${player.overall}</span></div><div class="panel-body attribute-summary">${Object.entries(player.attributes).map(([name, value]) => `<div><span>${ATTRIBUTE_LABELS[name]}</span><strong>${value}</strong></div>`).join("")}</div></section>
     </div>
+    ${matchPanel}
     <section class="panel training-panel"><div class="panel-header"><h2>WEEKLY TRAINING</h2><span class="kicker">WEEK ${(player.training.weeks || 0) + 1}</span></div><div class="panel-body">
       <div class="training-toolbar">
         <label>성장 목표<select id="training-goal">${["technique", "physical", "mental", "position"].map((goal) => `<option value="${goal}" ${player.training.goal === goal ? "selected" : ""}>${TRAINING_LABELS[goal]}</option>`).join("")}</select></label>
@@ -350,6 +358,107 @@ function renderPlayerCareer() {
       <button class="primary-button" id="complete-training-week" type="button">이번 주 훈련 완료</button>
     </div></section>
     <div class="record-grid"><section class="panel"><div class="panel-header"><h2>SEASON RECORD</h2></div><dl class="record-list">${playerStats(player.seasonStats)}</dl></section><section class="panel"><div class="panel-header"><h2>CAREER RECORD</h2></div><dl class="record-list">${playerStats(player.careerStats)}</dl></section></div>`;
+}
+
+const PLAYER_SPEEDS = { pause: null, "0.5x": 1200, "1x": 600, "2x": 300, highlights: 120 };
+const PLAYER_HIGHLIGHTS = new Set(["kickoff", "shot", "save", "key-pass", "goal", "caution", "substitution", "full-time"]);
+const SELECTION_LABELS = { starter: "선발", bench: "벤치", out: "명단 제외" };
+
+function playerLiveRating(match) {
+  const seen = match.events.slice(0, match.cursor).filter(({ personal }) => personal);
+  if (!seen.length || match.selection === "out") return "-";
+  const bonus = seen.reduce((sum, event) => sum + (event.outcome === "goal" ? 1.2 : event.outcome === "assist" ? 0.8 : 0.15), 0);
+  return Math.min(10, 6 + bonus).toFixed(1);
+}
+
+function renderPlayerMatch() {
+  const fixture = playerMatch.fixture;
+  const home = team(fixture.home);
+  const away = team(fixture.away);
+  app.innerHTML = `${header("PLAYER MATCH", `${escapeHtml(playerMatch.player.name)} · ${SELECTION_LABELS[playerMatch.selection]}`, "LIVE PLAYER FEED")}
+    <section class="panel player-match-panel">
+      <div class="player-match-toolbar" aria-label="경기 속도">${[["pause", "일시정지"], ["0.5x", "0.5×"], ["1x", "1×"], ["2x", "2×"], ["highlights", "주요 장면만"]].map(([speed, label]) => `<button type="button" class="secondary-button" data-player-speed="${speed}" aria-pressed="${playerMatch.speed === speed}">${label}</button>`).join("")}</div>
+      <div class="player-match-status"><span>출전 <strong>${SELECTION_LABELS[playerMatch.selection]}</strong></span><span>개인 평점 <strong id="player-live-rating">-</strong></span></div>
+      <div class="match-stage"><div class="pitch-wrap"><canvas id="match-canvas" aria-label="선수 커리어 경기장"></canvas><div class="scoreboard"><span id="match-minute">00'</span><br><strong id="match-score">${home.short} 0 : 0 ${away.short}</strong></div></div><div class="highlight" id="match-highlight" hidden></div></div>
+      <p class="sr-only" id="match-announcement" aria-live="assertive" aria-atomic="true"></p><ol class="commentary" id="commentary" aria-live="polite"></ol>
+    </section>`;
+  visualState = matchVisualState(season, fixture);
+  drawPitch(document.querySelector("#match-canvas"));
+}
+
+function displayPlayerEvent(event) {
+  const fixture = playerMatch.fixture;
+  const visibleEvents = playerMatch.events.slice(0, playerMatch.cursor);
+  const sentence = event.commentary;
+  document.querySelector("#match-minute").textContent = `${event.minute}'`;
+  const score = scoreForEvents(fixture, visibleEvents);
+  document.querySelector("#match-score").textContent = `${team(fixture.home).short} ${score.home} : ${score.away} ${team(fixture.away).short}`;
+  document.querySelector("#player-live-rating").textContent = playerLiveRating(playerMatch);
+  const item = document.createElement("li");
+  item.textContent = sentence;
+  if (event.personal) item.className = "personal-commentary";
+  const log = document.querySelector("#commentary");
+  log.append(item);
+  log.scrollTop = log.scrollHeight;
+  const highlight = document.querySelector("#match-highlight");
+  highlight.replaceChildren();
+  const image = highlightImages[event.type];
+  if (image) {
+    const shown = image.cloneNode();
+    shown.alt = sentence;
+    const caption = document.createElement("p");
+    caption.textContent = sentence;
+    highlight.append(shown, caption);
+    highlight.hidden = false;
+  } else {
+    highlight.hidden = true;
+  }
+  if (["goal", "full-time"].includes(event.type)) document.querySelector("#match-announcement").textContent = `${sentence} ${document.querySelector("#match-score").textContent}`;
+}
+
+function completePlayerMatchDisplay() {
+  const summary = summarizePlayerMatch(playerMatch);
+  playerMatch = summary.match;
+  matchRunning = false;
+  savePlayerCareer(summary.player, "경기 결과 저장 완료", playerMatch.world);
+  const log = document.querySelector("#commentary");
+  log.insertAdjacentHTML("afterend", `<div class="player-match-summary"><strong>평점 ${summary.rating || "-"}</strong><span>${summary.minutes}분 · ${summary.goals}골 · ${summary.assists}도움 · 패스 ${summary.passesCompleted}/${summary.passesAttempted} · 수비 ${summary.defending}</span></div><button class="primary-button" id="player-match-complete" type="button">선수 화면으로 돌아가기</button>`);
+}
+
+function advancePlayerMatch() {
+  clearTimeout(playerMatchTimer);
+  if (!playerMatch || playerMatch.speed === "pause" || playerMatch.recordsApplied) return;
+  let consumed;
+  do {
+    consumed = consumePlayerEvent(playerMatch, playerMatch.cursor);
+    playerMatch = consumed.match;
+  } while (consumed.event && playerMatch.speed === "highlights" && !PLAYER_HIGHLIGHTS.has(consumed.event.type));
+  if (!consumed.event) {
+    completePlayerMatchDisplay();
+    return;
+  }
+  displayPlayerEvent(consumed.event);
+  playerMatchTimer = setTimeout(advancePlayerMatch, PLAYER_SPEEDS[playerMatch.speed]);
+}
+
+function setPlayerMatchSpeed(speed) {
+  if (!Object.hasOwn(PLAYER_SPEEDS, speed) || !playerMatch || playerMatch.recordsApplied) return;
+  clearTimeout(playerMatchTimer);
+  playerMatch = { ...playerMatch, speed };
+  document.querySelectorAll("[data-player-speed]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.playerSpeed === speed)));
+  if (speed !== "pause") advancePlayerMatch();
+}
+
+function playPlayerMatch() {
+  if (matchRunning) return;
+  const player = activeSlotResult().slot.career.player;
+  const fixture = userFixture();
+  if (!fixture) return;
+  playerMatch = createPlayerMatch(player, fixture, season, Math.random);
+  season = playerMatch.world;
+  matchRunning = true;
+  renderPlayerMatch();
+  highlightsReady.finally(advancePlayerMatch);
 }
 
 function beginCreation(index) {
@@ -763,9 +872,17 @@ app.addEventListener("click", (event) => {
   const formation = event.target.closest("[data-formation]");
   const tactic = event.target.closest("[data-tactic]");
   const player = event.target.closest("[data-player]");
+  const playerSpeed = event.target.closest("[data-player-speed]");
   const autoTraining = event.target.closest("#auto-training");
   const completeTraining = event.target.closest("#complete-training-week");
-  if (startButton) {
+  if (playerSpeed) {
+    setPlayerMatchSpeed(playerSpeed.dataset.playerSpeed);
+  } else if (event.target.closest("#start-player-match")) {
+    playPlayerMatch();
+  } else if (event.target.closest("#player-match-complete")) {
+    playerMatch = null;
+    renderPlayerCareer();
+  } else if (startButton) {
     if (startButton.dataset.startView === "new") {
       const openIndex = firstOpenSlot();
       if (openIndex < 0) {

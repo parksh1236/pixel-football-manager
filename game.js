@@ -381,6 +381,7 @@ export function createMatchEvents(season, fixture, result, random = Math.random)
   const phaseOrder = (event) => event.type === "half-time" ? 1 : event.type === "second-half-kickoff" ? -1 : 0;
   return events.sort((a, b) => a.minute - b.minute || phaseOrder(a) - phaseOrder(b)).map((event, index) => ({
     ...event,
+    id: `${fixture.id || `${fixture.round ?? "match"}-${fixture.home}-${fixture.away}`}-${index}`,
     visualSlot: event.teamId && event.teamId !== "team-0" ? (event.type === "save" ? 0 : 1 + Math.floor(random() * 10)) : null,
     variant: index % 2,
   }));

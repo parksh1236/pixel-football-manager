@@ -195,6 +195,15 @@ input, select { font: inherit; }
 .player-warning, .training-message { margin: 0 0 18px; padding: 11px 13px; border: 1px solid #775d27; color: var(--amber); background: #241f14; }
 .training-message { border-color: #28744b; color: var(--green); background: #10271f; }
 .training-panel, .record-grid { margin-top: 18px; }
+.player-next-match { margin-top: 18px; }
+.player-match-toolbar { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; padding: 12px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.player-match-toolbar .secondary-button[aria-pressed="true"] { border-color: var(--green); color: var(--green); background: #10271f; }
+.player-match-status { display: flex; justify-content: center; gap: 24px; padding: 10px 14px; color: var(--muted); background: #08121d; }
+.player-match-status strong { margin-left: 5px; color: var(--amber); }
+.personal-commentary { color: var(--green); font-weight: 800; }
+.player-match-summary { display: flex; justify-content: space-between; gap: 12px; margin: 14px 18px 0; padding: 12px; border: 1px solid #28744b; background: #10271f; }
+.player-match-summary strong { color: var(--amber); }
+.player-match-panel > .primary-button { width: calc(100% - 36px); margin: 14px 18px 18px; }
 .training-toolbar { display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)) auto; gap: 10px; align-items: end; }
 .training-toolbar label, .training-day label { display: grid; gap: 6px; color: var(--muted); font-size: .7rem; }
 .training-toolbar select, .training-day select { min-height: 42px; padding: 8px; border: 1px solid var(--line); color: var(--ink); background: #08121d; font: inherit; }
@@ -291,6 +300,9 @@ tr.user-row { color: var(--green); background: #10251e; }
   .offer-card dl { justify-content: flex-start; }
   .attribute-summary { grid-template-columns: repeat(2, 1fr); }
   .training-toolbar, .record-grid { grid-template-columns: 1fr; }
+  .player-match-toolbar { grid-template-columns: repeat(2, 1fr); }
+  .player-match-toolbar .secondary-button:last-child { grid-column: 1 / -1; }
+  .player-match-status, .player-match-summary { align-items: flex-start; flex-direction: column; gap: 6px; }
   .training-week { grid-template-columns: repeat(7, minmax(132px, 1fr)); }
   .growth-preview, .record-list { grid-template-columns: repeat(2, 1fr); }
 }
