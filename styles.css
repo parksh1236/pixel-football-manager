@@ -194,7 +194,12 @@ input, select { font: inherit; }
 .attribute-summary strong { color: var(--amber); }
 .player-warning, .training-message { margin: 0 0 18px; padding: 11px 13px; border: 1px solid #775d27; color: var(--amber); background: #241f14; }
 .training-message { border-color: #28744b; color: var(--green); background: #10271f; }
-.training-panel, .record-grid { margin-top: 18px; }
+.player-career-scene { max-width: 720px; margin: 0 0 18px; border: 2px solid var(--amber); background: #02050a; box-shadow: var(--shadow); }
+.player-career-scene img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+.player-career-scene figcaption { padding: 9px 11px; font-size: .75rem; line-height: 1.5; }
+.training-panel, .record-grid, .player-contracts { margin-top: 18px; }
+.player-contracts .offer-list { padding-top: 0; border-top: 0; }
+.offer-type { color: var(--amber) !important; text-transform: uppercase; }
 .player-next-match { margin-top: 18px; }
 .player-match-toolbar { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; padding: 12px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
 .player-match-toolbar .secondary-button[aria-pressed="true"] { border-color: var(--green); color: var(--green); background: #10271f; }
@@ -293,6 +298,7 @@ tr.user-row { color: var(--green); background: #10251e; }
   .formation-marker span { top: 31px; }
   .fixture-row { grid-template-columns: 1fr 54px 1fr; font-size: .72rem; }
   .highlight { position: static; width: 100%; border-width: 1px 0; box-shadow: none; }
+  .player-career-scene { max-width: none; border-width: 1px; box-shadow: none; }
   .form-grid, .archetype-grid, .player-profile-grid { grid-template-columns: 1fr; }
   .creation-progress { grid-template-columns: repeat(2, 1fr); }
   .attribute-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

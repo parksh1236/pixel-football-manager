@@ -6,11 +6,14 @@ import {
   applyTrainingWeek,
   ARCHETYPES,
   buildAutoSchedule,
+  acceptCareerOffer,
   consumePlayerEvent,
+  createCareerOffers,
   createCareerPlayer,
   createEntryOffers,
   createPlayerMatch,
   ratePlayerEvents,
+  PLAYER_SCENE_IMAGES,
   selectPlayerStatus,
   summarizePlayerMatch,
   validatePlayerCareerStore,
@@ -38,6 +41,56 @@ const draft = {
     heading: -3,
   },
 };
+
+test("career offers are valid deterministic renewals and transfers", () => {
+  const world = createSeason();
+  const player = {
+    ...createCareerPlayer(draft),
+    clubId: "team-0",
+    wage: 150_000,
+    contract: { clubId: "team-0", role: "주전", wage: 150_000, years: 2 },
+  };
+  const offers = createCareerOffers(player, world);
+
+  assert.deepEqual(createCareerOffers(player, world), offers);
+  assert.equal(offers[0].type, "renewal");
+  assert.equal(offers[0].clubId, "team-0");
+  assert.ok(offers.some(({ type }) => type === "transfer"));
+  assert.ok(offers.every(({ clubId, clubName, role, wage, years }) => (
+    typeof clubId === "string" && typeof clubName === "string" && typeof role === "string"
+    && wage > 0 && Number.isInteger(years) && years >= 1 && years <= 5
+  )));
+});
+
+test("accepted career offer updates contract without erasing records", () => {
+  const player = {
+    ...createCareerPlayer(draft),
+    clubId: "team-0",
+    careerStats: { appearances: 12, goals: 4 },
+    seasonStats: { appearances: 3, goals: 1 },
+  };
+  const offer = createCareerOffers(player, createSeason())[1];
+  const next = acceptCareerOffer(player, offer);
+
+  assert.equal(next.clubId, offer.clubId);
+  assert.equal(next.wage, offer.wage);
+  assert.deepEqual(next.contract, { clubId: offer.clubId, role: offer.role, wage: offer.wage, years: offer.years });
+  assert.deepEqual(next.careerStats, player.careerStats);
+  assert.deepEqual(next.seasonStats, player.seasonStats);
+  assert.throws(() => acceptCareerOffer(player, { ...offer, years: 6 }), /offer/i);
+});
+
+test("player scene ids map to the seven exact assets", () => {
+  assert.deepEqual(PLAYER_SCENE_IMAGES, {
+    dribble: "assets/player-scenes/dribble.png",
+    assist: "assets/player-scenes/assist.png",
+    tackle: "assets/player-scenes/tackle.png",
+    caution: "assets/player-scenes/card.png",
+    substitution: "assets/player-scenes/substitution.png",
+    training: "assets/player-scenes/training.png",
+    contract: "assets/player-scenes/contract.png",
+  });
+});
 
 test("creation rejects malformed identity fields", () => {
   for (const change of [

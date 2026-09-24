@@ -1,6 +1,6 @@
 import { calculateTable, commentate, completeRound, createSeason, FORMATIONS, formationPositions, formationSuitability, interpolateMatchState, lineupPositions, matchVisualState, migrateSeason, movePlayer, pitchPoint, scoreForEvents, swapStarter } from "./game.js";
 import { assignCareerClub, createCareerSlot, LEGACY_STORAGE_KEY, loadCareerStore, MAX_SLOTS, migrateLegacySave, parseSlots, saveCareerStore, updateActiveSlot } from "./career.js";
-import { applyTrainingWeek, ARCHETYPES, buildAutoSchedule, consumePlayerEvent, createCareerPlayer, createEntryOffers, createPlayerMatch, ratePlayerEvents, summarizePlayerMatch, validatePlayerCareerStore, validatePlayerDraft, validatePlayerIdentity, validateSchedule } from "./player-career.js";
+import { acceptCareerOffer, applyTrainingWeek, ARCHETYPES, buildAutoSchedule, consumePlayerEvent, createCareerOffers, createCareerPlayer, createEntryOffers, createPlayerMatch, PLAYER_SCENE_IMAGES, ratePlayerEvents, summarizePlayerMatch, validatePlayerCareerStore, validatePlayerDraft, validatePlayerIdentity, validateSchedule } from "./player-career.js";
 
 const app = document.querySelector("#app");
 const saveStatus = document.querySelector("#save-status");
@@ -24,6 +24,7 @@ let playerCreationError = "";
 let playerOfferState = null;
 let playerDraft = null;
 let playerTrainingMessage = "";
+let playerCareerScene = null;
 let playerMatch = null;
 let playerMatchTimer = null;
 let careerStore;
@@ -36,6 +37,7 @@ const HIGHLIGHTS = {
   "key-pass": "assets/highlights/pass.png",
   goal: "assets/highlights/celebration.png",
 };
+const PLAYER_IMAGES = { ...HIGHLIGHTS, ...PLAYER_SCENE_IMAGES };
 const highlightImages = {};
 const POSITION_LABELS = {
   GK: "골키퍼", RB: "오른쪽 수비", CB: "중앙 수비", LB: "왼쪽 수비", DM: "수비형 미드필더",
@@ -49,7 +51,7 @@ const TRAINING_DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 const TRAINING_LABELS = { technique: "기술", physical: "신체", mental: "정신", position: "포지션", recovery: "회복", rest: "휴식", match: "경기" };
 const INTENSITY_LABELS = { low: "낮음", normal: "보통", hard: "높음" };
 const PLAYER_MATCH_DAY = 5;
-const highlightsReady = Promise.all(Object.entries(HIGHLIGHTS).map(async ([type, src]) => {
+const highlightsReady = Promise.all(Object.entries(PLAYER_IMAGES).map(async ([type, src]) => {
   const image = new Image();
   image.src = src;
   try {
@@ -157,8 +159,8 @@ function saveSeason() {
 }
 
 const team = (id) => season.teams.find((item) => item.id === id);
-const userFixture = (round = season.round) => season.fixtures[round]?.find(
-  (fixture) => fixture.home === "team-0" || fixture.away === "team-0",
+const userFixture = (round = season.round, teamId = "team-0") => season.fixtures[round]?.find(
+  (fixture) => fixture.home === teamId || fixture.away === teamId,
 );
 
 function header(title, description, kicker = "CLUB HQ") {
@@ -297,9 +299,10 @@ function savePlayerCareer(player, successMessage, world = season) {
   const active = activeSlotResult();
   const slot = {
     ...active.slot,
+    clubId: player.clubId,
     round: world.round,
     savedAt: new Date().toISOString(),
-    career: { ...active.slot.career, player },
+    career: { ...active.slot.career, clubId: player.clubId, selectedClubId: player.clubId, player },
     world,
   };
   const slots = careerStore.slots.map((item) => item?.id === slot.id ? slot : item);
@@ -332,17 +335,20 @@ function renderPlayerCareer() {
   const warning = player.injuryDays > 0
     ? `부상 ${player.injuryDays}일 남음 · 고강도 훈련과 경기 출전이 제한됩니다.`
     : player.condition <= 40 ? "컨디션이 낮습니다. 고강도 훈련은 부상 위험을 높입니다." : "";
-  const fixture = userFixture();
+  const fixture = userFixture(season.round, player.clubId);
+  const careerOffers = createCareerOffers(player, season);
   const matchPanel = fixture ? `<section class="panel player-next-match"><div class="panel-header"><h2>NEXT FIXTURE</h2><span class="kicker">ROUND ${fixture.round + 1}</span></div><div class="panel-body"><div class="versus"><div><span class="crest" style="color:${team(fixture.home).color}">${team(fixture.home).short}</span><strong class="team-name">${escapeHtml(team(fixture.home).name)}</strong></div><span class="vs-mark">VS</span><div><span class="crest" style="color:${team(fixture.away).color}">${team(fixture.away).short}</span><strong class="team-name">${escapeHtml(team(fixture.away).name)}</strong></div></div><button class="primary-button" id="start-player-match" type="button">경기 시작</button></div></section>`
     : `<section class="panel player-next-match"><div class="panel-body season-end"><span class="kicker">SEASON COMPLETE</span><strong>시즌 일정 완료</strong></div></section>`;
   app.innerHTML = `${header("PLAYER CAREER", `${escapeHtml(slot.name)}의 선수 커리어입니다.`, "PLAYER MODE")}
     ${warning ? `<p class="player-warning" role="status">${warning}</p>` : ""}
     ${playerTrainingMessage ? `<p class="training-message" role="status">${escapeHtml(playerTrainingMessage)}</p>` : ""}
+    ${playerCareerScene ? `<figure class="player-career-scene"><img src="${PLAYER_SCENE_IMAGES[playerCareerScene.type]}" alt="${escapeHtml(playerCareerScene.commentary)}"><figcaption>${escapeHtml(playerCareerScene.commentary)}</figcaption></figure>` : ""}
     <div class="player-profile-grid">
       <section class="panel player-profile"><div class="panel-body"><span class="mode-badge">SLOT ${activeSlotResult().index + 1}</span><h2>${escapeHtml(player.name)}</h2><p>${escapeHtml(player.nationality)} · ${player.age}세 · ${player.height}cm · ${player.foot === "right" ? "오른발" : "왼발"}</p><dl><div><dt>소속</dt><dd>${escapeHtml(slotClub(slot))}</dd></div><div><dt>주 포지션</dt><dd>${player.preferredPosition} · ${Math.round(player.positionMastery[player.preferredPosition])}%</dd></div>${player.secondaryPositions.map((position) => `<div><dt>보조 ${position}</dt><dd>${Math.round(player.positionMastery[position])}%</dd></div>`).join("")}<div><dt>선수 유형</dt><dd>${ARCHETYPES[player.archetype].label}</dd></div><div><dt>컨디션</dt><dd>${Math.round(player.condition)}%</dd></div><div><dt>잠재력</dt><dd>${player.potential}</dd></div><div><dt>시장 가치</dt><dd>₩${player.value.toLocaleString("ko-KR")}</dd></div><div><dt>주급</dt><dd>₩${player.wage.toLocaleString("ko-KR")}</dd></div><div><dt>계약</dt><dd>${escapeHtml(player.contract.role)} · ${player.contract.years}년</dd></div><div><dt>감독 신뢰</dt><dd>${Math.round(player.trust)}%</dd></div></dl></div></section>
       <section class="panel"><div class="panel-header"><h2>PLAYER ATTRIBUTES</h2><span class="kicker">OVERALL ${player.overall}</span></div><div class="panel-body attribute-summary">${Object.entries(player.attributes).map(([name, value]) => `<div><span>${ATTRIBUTE_LABELS[name]}</span><strong>${value}</strong></div>`).join("")}</div></section>
     </div>
     ${matchPanel}
+    <section class="panel player-contracts"><div class="panel-header"><h2>CONTRACT OFFERS</h2><span class="kicker">RENEW / TRANSFER</span></div><div class="panel-body offer-list">${careerOffers.map((offer, index) => `<article class="offer-card"><div><span class="offer-type">${offer.type === "renewal" ? "재계약" : "이적 제안"}</span><strong>${escapeHtml(offer.clubName)}</strong><span>${escapeHtml(offer.role)}</span></div><dl><div><dt>주급</dt><dd>₩${offer.wage.toLocaleString("ko-KR")}</dd></div><div><dt>기간</dt><dd>${offer.years}년</dd></div></dl><button type="button" class="primary-button" data-career-offer-index="${index}">${offer.type === "renewal" ? "재계약 수락" : "이적 수락"}</button></article>`).join("")}</div></section>
     <section class="panel training-panel"><div class="panel-header"><h2>WEEKLY TRAINING</h2><span class="kicker">WEEK ${(player.training.weeks || 0) + 1}</span></div><div class="panel-body">
       <div class="training-toolbar">
         <label>성장 목표<select id="training-goal">${["technique", "physical", "mental", "position"].map((goal) => `<option value="${goal}" ${player.training.goal === goal ? "selected" : ""}>${TRAINING_LABELS[goal]}</option>`).join("")}</select></label>
@@ -400,7 +406,7 @@ function displayPlayerEvent(event) {
   log.scrollTop = log.scrollHeight;
   const highlight = document.querySelector("#match-highlight");
   highlight.replaceChildren();
-  const image = highlightImages[event.type];
+  const image = highlightImages[event.contribution === "assist" ? "assist" : event.type];
   if (image) {
     const shown = image.cloneNode();
     shown.alt = sentence;
@@ -450,7 +456,7 @@ function setPlayerMatchSpeed(speed) {
 function playPlayerMatch() {
   if (matchRunning) return;
   const player = activeSlotResult().slot.career.player;
-  const fixture = userFixture();
+  const fixture = userFixture(season.round, player.clubId);
   if (!fixture) return;
   playerMatch = createPlayerMatch(player, fixture, season, Math.random);
   season = playerMatch.world;
@@ -477,6 +483,7 @@ function activateSlot(index) {
   const saved = saveCareerStore(localStorage, next);
   careerStore = next;
   statusMessage = saved.ok ? "커리어 불러오기 완료" : saved.error;
+  playerCareerScene = null;
   screen = "active";
   activeView = "dashboard";
   render();
@@ -607,6 +614,18 @@ function acceptPlayerOffer(index) {
   activeView = "dashboard";
   render();
   app.focus();
+}
+
+function acceptPlayerCareerContract(index) {
+  const current = activeSlotResult()?.slot.career.player;
+  const offer = createCareerOffers(current, season)[index];
+  if (!offer) return;
+  const player = acceptCareerOffer(current, offer);
+  const commentary = `${offer.clubName} ${offer.type === "renewal" ? "재계약" : "이적"} 완료 · ${offer.role} · 주급 ₩${offer.wage.toLocaleString("ko-KR")} · ${offer.years}년`;
+  const saved = savePlayerCareer(player, "계약 저장 완료");
+  playerTrainingMessage = saved.ok ? commentary : saved.error;
+  playerCareerScene = saved.ok ? { type: "contract", commentary } : null;
+  renderPlayerCareer();
 }
 
 function tableMarkup(limit) {
@@ -871,9 +890,12 @@ app.addEventListener("click", (event) => {
   const tactic = event.target.closest("[data-tactic]");
   const player = event.target.closest("[data-player]");
   const playerSpeed = event.target.closest("[data-player-speed]");
+  const careerOffer = event.target.closest("[data-career-offer-index]");
   const autoTraining = event.target.closest("#auto-training");
   const completeTraining = event.target.closest("#complete-training-week");
-  if (playerSpeed) {
+  if (careerOffer) {
+    acceptPlayerCareerContract(Number(careerOffer.dataset.careerOfferIndex));
+  } else if (playerSpeed) {
     setPlayerMatchSpeed(playerSpeed.dataset.playerSpeed);
   } else if (event.target.closest("#start-player-match")) {
     playPlayerMatch();
@@ -916,6 +938,7 @@ app.addEventListener("click", (event) => {
     const intensity = document.querySelector("#training-intensity").value;
     const schedule = buildAutoSchedule(current, PLAYER_MATCH_DAY, goal, intensity);
     const nextPlayer = { ...current, training: { ...current.training, goal, intensity, schedule } };
+    playerCareerScene = null;
     playerTrainingMessage = "자동 일정이 저장되었습니다.";
     savePlayerCareer(nextPlayer, "훈련 일정 저장 완료");
     renderPlayerCareer();
@@ -925,7 +948,8 @@ app.addEventListener("click", (event) => {
       const result = applyTrainingWeek(current, playerSchedule(current), Math.random);
       const improved = Object.values(result.growth).reduce((sum, value) => sum + value, 0);
       playerTrainingMessage = `주간 훈련 완료 · 경험치 +${Math.round(result.player.training.experience - (current.training.experience || 0))} · 능력치 +${improved}`;
-      savePlayerCareer(result.player, "주간 훈련 저장 완료");
+      const saved = savePlayerCareer(result.player, "주간 훈련 저장 완료");
+      playerCareerScene = saved.ok ? { type: "training", commentary: playerTrainingMessage } : null;
       renderPlayerCareer();
     } catch (error) {
       playerTrainingMessage = error.message;
@@ -974,6 +998,7 @@ app.addEventListener("change", (event) => {
     return;
   }
   const nextPlayer = { ...current, training: { ...current.training, schedule: nextSchedule } };
+  playerCareerScene = null;
   playerTrainingMessage = `${TRAINING_DAYS[day]}요일 일정이 저장되었습니다.`;
   savePlayerCareer(nextPlayer, "훈련 일정 저장 완료");
   renderPlayerCareer();

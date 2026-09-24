@@ -1,6 +1,17 @@
 import { commentate, completeRound } from "./game.js";
 
 const POSITIONS = ["GK", "RB", "CB", "LB", "DM", "CM", "AM", "RW", "LW", "ST"];
+const CAREER_ROLES = ["핵심", "주전", "로테이션", "유망주"];
+
+export const PLAYER_SCENE_IMAGES = Object.freeze({
+  dribble: "assets/player-scenes/dribble.png",
+  assist: "assets/player-scenes/assist.png",
+  tackle: "assets/player-scenes/tackle.png",
+  caution: "assets/player-scenes/card.png",
+  substitution: "assets/player-scenes/substitution.png",
+  training: "assets/player-scenes/training.png",
+  contract: "assets/player-scenes/contract.png",
+});
 
 const archetype = (label, description, attributes) => Object.freeze({
   label,
@@ -254,6 +265,43 @@ export function createEntryOffers(player, path, teams) {
     return (suitable.length ? suitable : ranked.slice(0, 3)).map((team) => offerFor(player, team, false));
   }
   return [];
+}
+
+export function createCareerOffers(player, world) {
+  if (!isRecord(player) || !Number.isFinite(player.overall) || !Number.isFinite(player.wage)) return [];
+  const teams = Array.isArray(world?.teams) ? world.teams.filter((team) => (
+    isRecord(team) && typeof team.id === "string" && Number.isFinite(team.rating ?? 70)
+  )) : [];
+  const current = teams.find(({ id }) => id === player.clubId) || teams[0];
+  if (!current) return [];
+  const renewal = offerFor(player, current, false);
+  const transfers = createEntryOffers(player, "trial", teams.filter(({ id }) => id !== current.id)).slice(0, 2);
+  return [
+    {
+      ...renewal,
+      type: "renewal",
+      wage: Math.max(player.wage, renewal.wage),
+      years: clamp(Number.isInteger(player.contract?.years) ? player.contract.years : renewal.years, 1, 5),
+    },
+    ...transfers.map((offer) => ({ ...offer, type: "transfer", years: clamp(offer.years, 1, 5) })),
+  ];
+}
+
+export function acceptCareerOffer(player, offer) {
+  if (!isRecord(player) || !isRecord(offer)
+    || !["renewal", "transfer"].includes(offer.type)
+    || typeof offer.clubId !== "string" || !offer.clubId
+    || !CAREER_ROLES.includes(offer.role)
+    || !Number.isFinite(offer.wage) || offer.wage <= 0
+    || !Number.isInteger(offer.years) || offer.years < 1 || offer.years > 5) {
+    throw new Error("Invalid career offer.");
+  }
+  return {
+    ...player,
+    clubId: offer.clubId,
+    wage: offer.wage,
+    contract: { clubId: offer.clubId, role: offer.role, wage: offer.wage, years: offer.years },
+  };
 }
 
 const TRAINING_TYPES = ["technique", "physical", "mental", "position", "recovery", "rest", "match"];
