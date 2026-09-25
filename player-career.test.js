@@ -37,9 +37,6 @@ const draft = {
     vision: 4,
     passing: 3,
     flair: 3,
-    tackling: -4,
-    strength: -3,
-    heading: -3,
   },
 };
 
@@ -128,23 +125,29 @@ test("creation rejects duplicate and malformed positions", () => {
   assert.equal(validatePlayerDraft({ ...draft, preferredPosition: "invalid" }).ok, false);
 });
 
-test("creation rejects fractional, unbalanced, and non-ten-point adjustments", () => {
+test("creation requires ten added points, rejects decreases, and caps attributes at twenty", () => {
   for (const adjustments of [
-    { vision: 1.5, tackling: -1.5 },
-    { vision: 10, tackling: -9 },
-    { vision: 9, tackling: -9 },
-    { vision: 11, tackling: -11 },
-    { vision: 10, unknown: -10 },
+    { vision: 1.5, passing: 8.5 },
+    { vision: 9 },
+    { vision: 11 },
+    { vision: 10, tackling: -1 },
+    { vision: 6, passing: 4 },
+    { vision: 10, unknown: 0 },
   ]) {
     assert.equal(validatePlayerDraft({ ...draft, adjustments }).ok, false, JSON.stringify(adjustments));
   }
 });
 
-test("attribute adjustment summary shows both point budgets when they are unbalanced", () => {
-  assert.deepEqual(summarizeAttributeAdjustments({ passing: 10, tackling: -7, strength: -5 }), {
+test("attribute adjustment summary reports remaining or excess added points", () => {
+  assert.deepEqual(summarizeAttributeAdjustments({ passing: 8, tackling: 2 }), {
     added: 10,
-    removed: 12,
-    balance: -2,
+    remaining: 0,
+    excess: 0,
+  });
+  assert.deepEqual(summarizeAttributeAdjustments({ passing: 12 }), {
+    added: 12,
+    remaining: 0,
+    excess: 2,
   });
 });
 
@@ -162,8 +165,9 @@ test("created player keeps the archetype total and attribute bounds", () => {
   const baseTotal = Object.values(ARCHETYPES.playmaker.attributes).reduce((sum, value) => sum + value, 0);
   const finalTotal = Object.values(player.attributes).reduce((sum, value) => sum + value, 0);
 
-  assert.equal(finalTotal, baseTotal);
+  assert.equal(finalTotal, baseTotal + 10);
   assert.ok(Object.values(player.attributes).every((value) => Number.isInteger(value) && value >= 1 && value <= 20));
+  assert.ok(Object.entries(player.attributes).every(([name, value]) => value >= ARCHETYPES.playmaker.attributes[name]));
   assert.equal(player.attributes.vision, ARCHETYPES.playmaker.attributes.vision + 4);
   assert.equal(player.preferredPosition, "AM");
   assert.deepEqual(player.secondaryPositions, ["CM", "RW"]);

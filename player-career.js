@@ -52,8 +52,7 @@ const total = (values) => values.reduce((sum, value) => sum + value, 0);
 export function summarizeAttributeAdjustments(adjustments) {
   const values = isRecord(adjustments) ? Object.values(adjustments).filter(Number.isFinite) : [];
   const added = total(values.filter((value) => value > 0));
-  const removed = total(values.filter((value) => value < 0).map(Math.abs));
-  return { added, removed, balance: added - removed };
+  return { added, remaining: Math.max(0, 10 - added), excess: Math.max(0, added - 10) };
 }
 
 export function validatePlayerIdentity(draft) {
@@ -97,13 +96,13 @@ export function validatePlayerDraft(draft) {
     if (entries.some(([name, value]) => !Object.hasOwn(selectedArchetype.attributes, name) || !Number.isInteger(value))) {
       errors.push("능력치 조정은 알려진 항목의 정수만 사용할 수 있습니다.");
     } else {
-      const { added, removed } = summarizeAttributeAdjustments(adjustments);
-      if (added !== 10 || removed !== 10) {
-        errors.push(`능력치를 10포인트 올리고 10포인트 내려야 합니다. (현재 +${added} / -${removed})`);
+      const { added } = summarizeAttributeAdjustments(adjustments);
+      if (values.some((value) => value < 0) || added !== 10) {
+        errors.push(`추가 능력치 포인트를 총 10포인트 배분하세요. (현재 ${added}/10)`);
       }
       if (Object.entries(selectedArchetype.attributes).some(([name, value]) => {
         const adjusted = value + (adjustments[name] || 0);
-        return adjusted < 1 || adjusted > 20;
+        return adjusted > 20;
       })) errors.push("능력치는 1~20 범위여야 합니다.");
     }
   }

@@ -80,7 +80,7 @@ function resetPlayerCreation() {
     preferredPosition: "AM",
     secondaryPositions: ["CM", "RW"],
     archetype: "playmaker",
-    adjustments: { vision: 4, passing: 3, flair: 3, tackling: -4, strength: -3, heading: -3 },
+    adjustments: { vision: 4, passing: 3, flair: 3 },
     entryPath: "club-choice",
     selectedClubId: "team-0",
   };
@@ -248,13 +248,13 @@ function renderPlayerCreationStep() {
     </div></fieldset>${playerFormActions()}`;
   } else {
     const base = ARCHETYPES[playerDraft.archetype].attributes;
-    const { added, removed, balance } = summarizeAttributeAdjustments(playerDraft.adjustments);
+    const { added, remaining, excess } = summarizeAttributeAdjustments(playerDraft.adjustments);
     const offers = playerOfferState ? `<section class="offer-list" aria-labelledby="offer-heading"><h3 id="offer-heading">입단 제안</h3>${playerOfferState.offers.map((offer, index) => `<article class="offer-card"><div><strong>${escapeHtml(offer.clubName)}</strong><span>${offer.role}</span></div><dl><div><dt>주급</dt><dd>₩${offer.wage.toLocaleString("ko-KR")}</dd></div><div><dt>기간</dt><dd>${offer.years}년</dd></div></dl><button type="button" class="primary-button" data-offer-index="${index}">이 제안 수락</button></article>`).join("")}</section>` : "";
     fields = `<fieldset><legend>4. 능력 조정과 시작 경로</legend>
-      <p class="point-summary" id="point-summary" aria-live="polite">올리기 <strong>${added}/10</strong> · 내리기 <strong>${removed}/10</strong> · 균형 <strong>${balance > 0 ? "+" : ""}${balance}</strong></p>
+      <p class="point-summary" id="point-summary" aria-live="polite">추가 포인트 <strong>${added}/10</strong> · ${excess ? `초과 ${excess}` : `남은 ${remaining}`}</p>
       <div class="attribute-grid">${Object.entries(base).map(([name, score]) => {
         const adjustment = playerDraft.adjustments[name] || 0;
-        return `<label>${ATTRIBUTE_LABELS[name]} <small>기본 ${score} → <output data-final-attribute="${name}">${score + adjustment}</output></small><input name="adjustment-${name}" type="number" min="-${Math.min(10, score - 1)}" max="${Math.min(10, 20 - score)}" step="1" required value="${adjustment}"></label>`;
+        return `<label>${ATTRIBUTE_LABELS[name]} <small>기본 ${score} → <output data-final-attribute="${name}">${score + adjustment}</output></small><input name="adjustment-${name}" type="number" min="0" max="${Math.min(10, 20 - score)}" step="1" required value="${adjustment}"></label>`;
       }).join("")}</div>
       <fieldset class="choice-fieldset"><legend>시작 경로</legend><div class="entry-paths">
         ${[["club-choice", "구단 선택", "선택한 구단과 즉시 계약"], ["trial", "입단 테스트", "적합한 구단 최대 3곳의 제안"], ["free-agent", "자유계약", "관심 구단의 조건 비교"]].map(([value, label, help]) => `<label><input type="radio" name="entryPath" value="${value}" ${playerDraft.entryPath === value ? "checked" : ""}><strong>${label}</strong><span>${help}</span></label>`).join("")}
@@ -1020,9 +1020,9 @@ app.addEventListener("input", (event) => {
   }
   const base = ARCHETYPES[playerDraft.archetype].attributes;
   const adjustments = Object.fromEntries(Object.keys(base).map((name) => [name, Number(form.elements[`adjustment-${name}`].value)]));
-  const { added, removed, balance } = summarizeAttributeAdjustments(adjustments);
+  const { added, remaining, excess } = summarizeAttributeAdjustments(adjustments);
   const summary = form.querySelector("#point-summary");
-  if (summary) summary.textContent = `올리기 ${added}/10 · 내리기 ${removed}/10 · 균형 ${balance > 0 ? "+" : ""}${balance}`;
+  if (summary) summary.textContent = `추가 포인트 ${added}/10 · ${excess ? `초과 ${excess}` : `남은 ${remaining}`}`;
   Object.entries(base).forEach(([name, score]) => {
     const output = form.querySelector(`[data-final-attribute="${name}"]`);
     if (output) output.value = String(score + Number(form.elements[`adjustment-${name}`].value));
