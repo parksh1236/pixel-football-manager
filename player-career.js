@@ -55,6 +55,11 @@ export function summarizeAttributeAdjustments(adjustments) {
   return { added, remaining: Math.max(0, 10 - added), excess: Math.max(0, added - 10) };
 }
 
+export function capAttributeAdjustment(adjustments, name, value, attributes) {
+  const otherPoints = Object.entries(adjustments).reduce((sum, [key, amount]) => key === name ? sum : sum + Math.max(0, amount), 0);
+  return Math.min(Math.max(0, Math.trunc(Number(value) || 0)), Math.max(0, 10 - otherPoints), 20 - attributes[name]);
+}
+
 export function createEmptyAttributeAdjustments() {
   return Object.fromEntries(Object.keys(ARCHETYPES.playmaker.attributes).map((name) => [name, 0]));
 }

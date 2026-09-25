@@ -11,6 +11,7 @@ import {
   createCareerOffers,
   createCareerPlayer,
   createEmptyAttributeAdjustments,
+  capAttributeAdjustment,
   updateAttributeDraftAdjustments,
   createEntryOffers,
   createPlayerMatch,
@@ -167,6 +168,14 @@ test("attribute edits persist in the player draft without mutating prior state",
 
   assert.equal(summarizeAttributeAdjustments(next.adjustments).remaining, 7);
   assert.equal(original.adjustments.passing, 0);
+});
+
+test("an attribute edit is capped by the points remaining after other allocations", () => {
+  const base = ARCHETYPES.playmaker.attributes;
+  const adjustments = { ...createEmptyAttributeAdjustments(), pace: 4, passing: 3 };
+
+  assert.equal(capAttributeAdjustment(adjustments, "flair", 8, base), 3);
+  assert.equal(capAttributeAdjustment(adjustments, "finishing", 8, base), 3);
 });
 
 test("creation rejects inherited archetype and attribute keys without throwing", () => {

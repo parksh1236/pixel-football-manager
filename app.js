@@ -1,6 +1,6 @@
 import { calculateTable, commentate, completeRound, createSeason, FORMATIONS, formationPositions, formationSuitability, interpolateMatchState, lineupPositions, matchVisualState, migrateSeason, movePlayer, pitchPoint, scoreForEvents, swapStarter } from "./game.js";
 import { assignCareerClub, createCareerSlot, LEGACY_STORAGE_KEY, loadCareerStore, MAX_SLOTS, migrateLegacySave, parseSlots, saveCareerStore, updateActiveSlot } from "./career.js";
-import { acceptCareerOffer, applyTrainingWeek, ARCHETYPES, buildAutoSchedule, consumePlayerEvent, createCareerOffers, createCareerPlayer, createEmptyAttributeAdjustments, createEntryOffers, createPlayerMatch, PLAYER_SCENE_IMAGES, ratePlayerEvents, summarizeAttributeAdjustments, summarizePlayerMatch, updateAttributeDraftAdjustments, validatePlayerCareerStore, validatePlayerDraft, validatePlayerIdentity, validateSchedule } from "./player-career.js";
+import { acceptCareerOffer, applyTrainingWeek, ARCHETYPES, buildAutoSchedule, capAttributeAdjustment, consumePlayerEvent, createCareerOffers, createCareerPlayer, createEmptyAttributeAdjustments, createEntryOffers, createPlayerMatch, PLAYER_SCENE_IMAGES, ratePlayerEvents, summarizeAttributeAdjustments, summarizePlayerMatch, updateAttributeDraftAdjustments, validatePlayerCareerStore, validatePlayerDraft, validatePlayerIdentity, validateSchedule } from "./player-career.js";
 
 const app = document.querySelector("#app");
 const saveStatus = document.querySelector("#save-status");
@@ -1020,6 +1020,14 @@ app.addEventListener("input", (event) => {
   }
   const base = ARCHETYPES[playerDraft.archetype].attributes;
   const adjustments = Object.fromEntries(Object.keys(base).map((name) => [name, Number(form.elements[`adjustment-${name}`].value)]));
+  const changedName = event.target.name?.startsWith("adjustment-") ? event.target.name.slice("adjustment-".length) : "";
+  if (Object.hasOwn(base, changedName)) {
+    adjustments[changedName] = capAttributeAdjustment(adjustments, changedName, adjustments[changedName], base);
+    form.elements[`adjustment-${changedName}`].value = String(adjustments[changedName]);
+  }
+  Object.keys(base).forEach((name) => {
+    form.elements[`adjustment-${name}`].max = String(capAttributeAdjustment(adjustments, name, 10, base));
+  });
   playerDraft = updateAttributeDraftAdjustments(playerDraft, adjustments);
   const { added, remaining, excess } = summarizeAttributeAdjustments(adjustments);
   const summary = form.querySelector("#point-summary");
