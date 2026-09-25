@@ -10,6 +10,8 @@ import {
   consumePlayerEvent,
   createCareerOffers,
   createCareerPlayer,
+  createEmptyAttributeAdjustments,
+  updateAttributeDraftAdjustments,
   createEntryOffers,
   createPlayerMatch,
   ratePlayerEvents,
@@ -149,6 +151,22 @@ test("attribute adjustment summary reports remaining or excess added points", ()
     remaining: 0,
     excess: 2,
   });
+});
+
+test("new attribute adjustments start with the full ten-point pool available", () => {
+  const adjustments = createEmptyAttributeAdjustments();
+
+  assert.equal(Object.keys(adjustments).length, 12);
+  assert.ok(Object.values(adjustments).every((value) => value === 0));
+  assert.deepEqual(summarizeAttributeAdjustments(adjustments), { added: 0, remaining: 10, excess: 0 });
+});
+
+test("attribute edits persist in the player draft without mutating prior state", () => {
+  const original = { ...draft, adjustments: createEmptyAttributeAdjustments() };
+  const next = updateAttributeDraftAdjustments(original, { ...original.adjustments, passing: 3 });
+
+  assert.equal(summarizeAttributeAdjustments(next.adjustments).remaining, 7);
+  assert.equal(original.adjustments.passing, 0);
 });
 
 test("creation rejects inherited archetype and attribute keys without throwing", () => {

@@ -55,6 +55,14 @@ export function summarizeAttributeAdjustments(adjustments) {
   return { added, remaining: Math.max(0, 10 - added), excess: Math.max(0, added - 10) };
 }
 
+export function createEmptyAttributeAdjustments() {
+  return Object.fromEntries(Object.keys(ARCHETYPES.playmaker.attributes).map((name) => [name, 0]));
+}
+
+export function updateAttributeDraftAdjustments(draft, adjustments) {
+  return { ...draft, adjustments };
+}
+
 export function validatePlayerIdentity(draft) {
   const errors = [];
   if (!isRecord(draft)) return { ok: false, errors: ["선수 정보가 필요합니다."] };

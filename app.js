@@ -1,6 +1,6 @@
 import { calculateTable, commentate, completeRound, createSeason, FORMATIONS, formationPositions, formationSuitability, interpolateMatchState, lineupPositions, matchVisualState, migrateSeason, movePlayer, pitchPoint, scoreForEvents, swapStarter } from "./game.js";
 import { assignCareerClub, createCareerSlot, LEGACY_STORAGE_KEY, loadCareerStore, MAX_SLOTS, migrateLegacySave, parseSlots, saveCareerStore, updateActiveSlot } from "./career.js";
-import { acceptCareerOffer, applyTrainingWeek, ARCHETYPES, buildAutoSchedule, consumePlayerEvent, createCareerOffers, createCareerPlayer, createEntryOffers, createPlayerMatch, PLAYER_SCENE_IMAGES, ratePlayerEvents, summarizeAttributeAdjustments, summarizePlayerMatch, validatePlayerCareerStore, validatePlayerDraft, validatePlayerIdentity, validateSchedule } from "./player-career.js";
+import { acceptCareerOffer, applyTrainingWeek, ARCHETYPES, buildAutoSchedule, consumePlayerEvent, createCareerOffers, createCareerPlayer, createEmptyAttributeAdjustments, createEntryOffers, createPlayerMatch, PLAYER_SCENE_IMAGES, ratePlayerEvents, summarizeAttributeAdjustments, summarizePlayerMatch, updateAttributeDraftAdjustments, validatePlayerCareerStore, validatePlayerDraft, validatePlayerIdentity, validateSchedule } from "./player-career.js";
 
 const app = document.querySelector("#app");
 const saveStatus = document.querySelector("#save-status");
@@ -80,7 +80,7 @@ function resetPlayerCreation() {
     preferredPosition: "AM",
     secondaryPositions: ["CM", "RW"],
     archetype: "playmaker",
-    adjustments: { vision: 4, passing: 3, flair: 3 },
+    adjustments: createEmptyAttributeAdjustments(),
     entryPath: "club-choice",
     selectedClubId: "team-0",
   };
@@ -1020,6 +1020,7 @@ app.addEventListener("input", (event) => {
   }
   const base = ARCHETYPES[playerDraft.archetype].attributes;
   const adjustments = Object.fromEntries(Object.keys(base).map((name) => [name, Number(form.elements[`adjustment-${name}`].value)]));
+  playerDraft = updateAttributeDraftAdjustments(playerDraft, adjustments);
   const { added, remaining, excess } = summarizeAttributeAdjustments(adjustments);
   const summary = form.querySelector("#point-summary");
   if (summary) summary.textContent = `추가 포인트 ${added}/10 · ${excess ? `초과 ${excess}` : `남은 ${remaining}`}`;
