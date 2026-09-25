@@ -1,6 +1,6 @@
 import { calculateTable, commentate, completeRound, createSeason, FORMATIONS, formationPositions, formationSuitability, interpolateMatchState, lineupPositions, matchVisualState, migrateSeason, movePlayer, pitchPoint, scoreForEvents, swapStarter } from "./game.js";
 import { assignCareerClub, createCareerSlot, LEGACY_STORAGE_KEY, loadCareerStore, MAX_SLOTS, migrateLegacySave, parseSlots, saveCareerStore, updateActiveSlot } from "./career.js";
-import { acceptCareerOffer, applyTrainingWeek, ARCHETYPES, buildAutoSchedule, consumePlayerEvent, createCareerOffers, createCareerPlayer, createEntryOffers, createPlayerMatch, PLAYER_SCENE_IMAGES, ratePlayerEvents, summarizePlayerMatch, validatePlayerCareerStore, validatePlayerDraft, validatePlayerIdentity, validateSchedule } from "./player-career.js";
+import { acceptCareerOffer, applyTrainingWeek, ARCHETYPES, buildAutoSchedule, consumePlayerEvent, createCareerOffers, createCareerPlayer, createEntryOffers, createPlayerMatch, PLAYER_SCENE_IMAGES, ratePlayerEvents, summarizeAttributeAdjustments, summarizePlayerMatch, validatePlayerCareerStore, validatePlayerDraft, validatePlayerIdentity, validateSchedule } from "./player-career.js";
 
 const app = document.querySelector("#app");
 const saveStatus = document.querySelector("#save-status");
@@ -248,12 +248,10 @@ function renderPlayerCreationStep() {
     </div></fieldset>${playerFormActions()}`;
   } else {
     const base = ARCHETYPES[playerDraft.archetype].attributes;
-    const values = Object.values(playerDraft.adjustments);
-    const positive = values.filter((value) => value > 0).reduce((sum, value) => sum + value, 0);
-    const balance = values.reduce((sum, value) => sum + value, 0);
+    const { added, removed, balance } = summarizeAttributeAdjustments(playerDraft.adjustments);
     const offers = playerOfferState ? `<section class="offer-list" aria-labelledby="offer-heading"><h3 id="offer-heading">입단 제안</h3>${playerOfferState.offers.map((offer, index) => `<article class="offer-card"><div><strong>${escapeHtml(offer.clubName)}</strong><span>${offer.role}</span></div><dl><div><dt>주급</dt><dd>₩${offer.wage.toLocaleString("ko-KR")}</dd></div><div><dt>기간</dt><dd>${offer.years}년</dd></div></dl><button type="button" class="primary-button" data-offer-index="${index}">이 제안 수락</button></article>`).join("")}</section>` : "";
     fields = `<fieldset><legend>4. 능력 조정과 시작 경로</legend>
-      <p class="point-summary" id="point-summary" aria-live="polite">더한 포인트 <strong>${positive}/10</strong> · 총 조정 <strong>${balance}</strong></p>
+      <p class="point-summary" id="point-summary" aria-live="polite">올리기 <strong>${added}/10</strong> · 내리기 <strong>${removed}/10</strong> · 균형 <strong>${balance > 0 ? "+" : ""}${balance}</strong></p>
       <div class="attribute-grid">${Object.entries(base).map(([name, score]) => {
         const adjustment = playerDraft.adjustments[name] || 0;
         return `<label>${ATTRIBUTE_LABELS[name]} <small>기본 ${score} → <output data-final-attribute="${name}">${score + adjustment}</output></small><input name="adjustment-${name}" type="number" min="-${Math.min(10, score - 1)}" max="${Math.min(10, 20 - score)}" step="1" required value="${adjustment}"></label>`;
@@ -1021,11 +1019,10 @@ app.addEventListener("input", (event) => {
     if (submit) submit.textContent = "입단 제안 확인";
   }
   const base = ARCHETYPES[playerDraft.archetype].attributes;
-  const values = Object.keys(base).map((name) => Number(form.elements[`adjustment-${name}`].value));
-  const positive = values.filter((value) => value > 0).reduce((sum, value) => sum + value, 0);
-  const balance = values.reduce((sum, value) => sum + value, 0);
+  const adjustments = Object.fromEntries(Object.keys(base).map((name) => [name, Number(form.elements[`adjustment-${name}`].value)]));
+  const { added, removed, balance } = summarizeAttributeAdjustments(adjustments);
   const summary = form.querySelector("#point-summary");
-  if (summary) summary.textContent = `더한 포인트 ${positive}/10 · 총 조정 ${balance}`;
+  if (summary) summary.textContent = `올리기 ${added}/10 · 내리기 ${removed}/10 · 균형 ${balance > 0 ? "+" : ""}${balance}`;
   Object.entries(base).forEach(([name, score]) => {
     const output = form.querySelector(`[data-final-attribute="${name}"]`);
     if (output) output.value = String(score + Number(form.elements[`adjustment-${name}`].value));

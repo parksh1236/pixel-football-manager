@@ -16,6 +16,7 @@ import {
   PLAYER_SCENE_IMAGES,
   selectPlayerStatus,
   summarizePlayerMatch,
+  summarizeAttributeAdjustments,
   validatePlayerCareerStore,
   validatePlayerDraft,
   validatePlayerIdentity,
@@ -137,6 +138,14 @@ test("creation rejects fractional, unbalanced, and non-ten-point adjustments", (
   ]) {
     assert.equal(validatePlayerDraft({ ...draft, adjustments }).ok, false, JSON.stringify(adjustments));
   }
+});
+
+test("attribute adjustment summary shows both point budgets when they are unbalanced", () => {
+  assert.deepEqual(summarizeAttributeAdjustments({ passing: 10, tackling: -7, strength: -5 }), {
+    added: 10,
+    removed: 12,
+    balance: -2,
+  });
 });
 
 test("creation rejects inherited archetype and attribute keys without throwing", () => {
